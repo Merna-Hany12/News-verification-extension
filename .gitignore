@@ -1,0 +1,16 @@
+# API Keys
+haqq-v2/background/config.js
+
+# Python
+APIs/venv/
+APIs/__pycache__/
+APIs/*.pyc
+APIs/.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
