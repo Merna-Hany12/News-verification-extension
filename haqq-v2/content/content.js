@@ -50,14 +50,14 @@ function extractAll(postEl) {
     postEl.querySelector('[data-ad-rendering-role="story_message"]');
 
   if (msgEl) {
-    const t = msgEl.innerText?.trim().replace(/\n+/g, " ");
+    const t = msgEl.textContent?.trim().replace(/\n+/g, " ");
     if (t && t.length > 10) out.text = t.slice(0, 3000);
   }
 
   // Fallback text
   if (!out.text) {
     for (const b of postEl.querySelectorAll('[dir="auto"]')) {
-      const t = b.innerText?.trim().replace(/\n+/g, " ");
+      const t = b.textContent?.trim().replace(/\n+/g, " ");
       if (t && t.length > 30) { out.text = t.slice(0, 3000); break; }
     }
   }
@@ -270,7 +270,6 @@ async function sendToBackground(type, content) {
         sources: []
       };
     } 
-
     // ai.is_news === true → fall through to NewsData with cleanText
     const lang = detectLanguage(cleanText);
     console.log("[HAQQ] Detected language:", lang);

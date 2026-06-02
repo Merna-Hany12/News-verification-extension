@@ -17,28 +17,36 @@ classifier = None
 @app.on_event("startup")
 def load_model():
     global classifier
+    print("LOADING MODEL...")
     classifier = pipeline(
         "zero-shot-classification",
-        model="joeddav/xlm-roberta-large-xnli",
-        framework="pt"
+        model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
     )
-    print("✅ Model loaded")
-
+    print("MODEL LOADED")
 class TextRequest(BaseModel):
     text: str
 
 LABELS = [
-    "breaking news or official government announcement about politics war economy prices elections disasters infrastructure or current events reported by a media outlet or official source",
+    "breaking news or official government announcement about politics war economy prices elections disasters infrastructure",
     "personal story daily life opinion joke complaint question gossip or casual social media post written by an individual person"
 ]
 
 @app.post("/classify")
 def classify_text(request: TextRequest):
     result = classifier(request.text, LABELS)
+
+    top_label = result["labels"][0]
+    top_score = float(result["scores"][0])
+
+    is_news = (
+        "breaking news" in top_label.lower()
+        and top_score > 0.5
+    )
+
     return {
-        "label": result["labels"][0],
-        "score": float(result["scores"][0]),
-        "is_news": result["labels"][0] == "factual news report"
+        "label": top_label,
+        "score": top_score,
+        "is_news": is_news
     }
 
 if __name__ == "__main__":

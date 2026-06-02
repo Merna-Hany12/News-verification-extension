@@ -8,7 +8,6 @@ const FREENEWS_BASE    = "https://api.freenewsapi.io/v1/news";
 // ─── CACHE + DEDUP ────────────────────────────────────────
 const cache    = new Map();
 const inFlight = new Map();
-
 // ─── STATS ────────────────────────────────────────────────
 let stats = { total: 0, fact: 0, unverified: 0, fake: 0, ai_generated: 0 };
 
@@ -85,7 +84,7 @@ async function isNewsText(text) {
 async function classifyWithAI(text) {
   console.log("[HAQQ] Sending to AI:", text);
   try {
-    const res = await fetch("https://user-halved-sedation.ngrok-free.dev/classify", {
+    const res = await fetch(`${NGROK_URL}/classify`, {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
@@ -103,50 +102,102 @@ async function classifyWithAI(text) {
 }
 
 async function verifyText({ text, lang }) {
-  if (!text || text.trim().length < 15)
-    return result("unverified", 0, "النص قصير جداً للتحقق.", []);
+  // Basic validation
+  if (!text || text.trim().length < 15) {
+    return result(
+      "unverified",
+      0,
+      "النص قصير جداً للتحقق.",
+      []
+    );
+  }
 
+  // AI classification first
+  let classification = null;
+
+  try {
+    classification = await classifyWithAI(text);
+    console.log("[HAQQ] Classification result:", classification);
+  } catch (e) {
+    console.warn("[HAQQ] Classification failed:", e);
+  }
+
+  // Skip news search if AI says it's not news
+  if (
+    classification &&
+    (
+      classification.is_news === false ||
+      classification.label === "non_news"
+    )
+  ) {
+    return {
+      verdict: "non_news",
+      confidence: classification.score || 0.95,
+      explanation: "المحتوى لا يبدو خبراً، لذلك تم تخطي البحث الإخباري.",
+      sources: []
+    };
+  }
+
+  // Extract keywords
   const keywords = extractKeywords(text);
-  if (!keywords)
-    return result("unverified", 0.2, "لا توجد كلمات مفتاحية كافية للبحث", []);
 
+  if (!keywords) {
+    return result(
+      "unverified",
+      0.2,
+      "لا توجد كلمات مفتاحية كافية للبحث",
+      []
+    );
+  }
+
+  // Cache key
   const cKey = "text::" + keywords;
-  if (cache.has(cKey))    return cache.get(cKey);
-  if (inFlight.has(cKey)) return inFlight.get(cKey);
+
+  if (cache.has(cKey))
+    return cache.get(cKey);
+
+  if (inFlight.has(cKey))
+    return inFlight.get(cKey);
 
   const promise = (async () => {
-    console.log("[HAQQ] Searching in language:", lang);
+    console.log("[HAQQ] Searching news for:", keywords);
+    console.log("[HAQQ] Language:", lang);
 
     let articles = [];
 
     if (lang === "ar") {
-      // Arabic post — search Arabic only
       const [ndAr, fnAr] = await Promise.all([
         fetchNewsData(keywords, "ar"),
-        fetchFreeNews(keywords, "ar"),
+        fetchFreeNews(keywords, "ar")
       ]);
+
       articles = [...ndAr, ...fnAr];
 
     } else {
-      // English or unknown — search English only
       const [ndEn, fnEn] = await Promise.all([
         fetchNewsData(keywords, "en"),
-        fetchFreeNews(keywords, "en"),
+        fetchFreeNews(keywords, "en")
       ]);
+
       articles = [...ndEn, ...fnEn];
     }
 
-    console.log("[HAQQ] Total articles:", articles.length);
+    console.log("[HAQQ] Total articles found:", articles.length);
 
     const out = scoreArticles(text, keywords, articles);
+
     cache.set(cKey, out);
     inFlight.delete(cKey);
+
     stats.total++;
-    stats[out.verdict] = (stats[out.verdict] || 0) + 1;
+    stats[out.verdict] =
+      (stats[out.verdict] || 0) + 1;
+
     return out;
   })();
 
   inFlight.set(cKey, promise);
+
   return promise;
 }
 
