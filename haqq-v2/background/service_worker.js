@@ -5,9 +5,14 @@ const FREENEWS_API_KEY = CONFIG.FREENEWS_API_KEY;
 const NGROK_URL        = CONFIG.NGROK_URL;
 const NEWSDATA_BASE    = "https://newsdata.io/api/1/news";
 const FREENEWS_BASE    = "https://api.freenewsapi.io/v1/news";
+const CURRENTS_API_KEY = CONFIG.CURRENTS_API_KEY;
+const GNEWS_API_KEY    = CONFIG.GNEWS_API_KEY;
+const CURRENTS_BASE    = "https://api.currentsapi.services/v1/search";
+const GNEWS_BASE       = "https://gnews.io/api/v4/search";
 // ─── CACHE + DEDUP ────────────────────────────────────────
 const cache    = new Map();
 const inFlight = new Map();
+
 // ─── STATS ────────────────────────────────────────────────
 let stats = { total: 0, fact: 0, unverified: 0, fake: 0, ai_generated: 0 };
 
@@ -23,7 +28,11 @@ const TRUSTED = [
   // Egyptian
   "ahram","alahram","youm7","masrawy","elwatannews",
   "almasryalyoum","shorouk","elshorouk","vetogate",
-  "filbalad","mobtada","dotmsr","elbashayer","cairo24"
+  "filbalad","mobtada","dotmsr","elbashayer","cairo24",
+    "washingtonpost","wsj","bloomberg","time","newsweek",
+  "nbcnews","cbsnews","abcnews","usatoday","latimes",
+  "independent","telegraph","theguardian","ft",
+  "middleeasteye","arabicpost","atalayar"
 ];
 
 // ─── ARABIC STOP WORDS ────────────────────────────────────
@@ -65,36 +74,45 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 
-async function isNewsText(text) {
-  try {
-    const res = await fetch("http://localhost:8000/classify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text.slice(0, 500) })
-    });
-    const data = await res.json();
-    return data; // { label, score, is_news }
-  } catch (e) {
-    console.warn("[HAQQ] AI classifier unreachable:", e.message);
-    return null; // fail open — continue with NewsData anyway
-  }
-}
-
-
 async function classifyWithAI(text) {
-  console.log("[HAQQ] Sending to AI:", text);
+  // ── Guard — never send empty text ─────────────────────
+  if (!text || text.trim().length === 0) {
+    console.warn("[HAQQ] classifyWithAI — empty text, skipping");
+    return null;
+  }
+
+  const payload = text.trim().slice(0, 500);
+  console.log("[HAQQ] Sending to AI:", payload);
+
   try {
     const res = await fetch(`${NGROK_URL}/classify`, {
       method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
+      headers: {
+        "Content-Type":               "application/json",
         "ngrok-skip-browser-warning": "true"
       },
-      body: JSON.stringify({ text: text.slice(0, 500) })
+      body: JSON.stringify({ text: payload })
     });
+
+    console.log("[HAQQ] Classify status:", res.status);
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn("[HAQQ] Classify HTTP error:", err.slice(0, 200));
+      return null;
+    }
+
     const data = await res.json();
     console.log("[HAQQ] AI response:", data);
+
+    // ── Guard — server returned validation error ──────────
+    if (data.detail) {
+      console.warn("[HAQQ] Server validation error:", JSON.stringify(data.detail));
+      return null;
+    }
+
     return data;
+
   } catch (e) {
     console.warn("[HAQQ] AI unreachable:", e.message);
     return null;
@@ -102,104 +120,121 @@ async function classifyWithAI(text) {
 }
 
 async function verifyText({ text, lang }) {
-  // Basic validation
-  if (!text || text.trim().length < 15) {
-    return result(
-      "unverified",
-      0,
-      "النص قصير جداً للتحقق.",
-      []
-    );
-  }
+  if (!text || text.trim().length < 20)
+    return result("unverified", 0, "النص قصير جداً للتحقق.", []);
 
-  // AI classification first
-  let classification = null;
+    // ── 1. CLASSIFY ───────────────────────────────────────
+  console.log("[HAQQ] Classifying...");
 
-  try {
-    classification = await classifyWithAI(text);
-    console.log("[HAQQ] Classification result:", classification);
-  } catch (e) {
-    console.warn("[HAQQ] Classification failed:", e);
-  }
+  const classification = await classifyWithAI(text.slice(0, 500));
+  console.log("[HAQQ] Classification:", classification);
 
-  // Skip news search if AI says it's not news
+ // ── 2. NOT NEWS → stop ────────────────────────────────
   if (
     classification &&
+    !classification.detail &&
     (
-      classification.is_news === false ||
-      classification.label === "non_news"
+      !classification.is_news ||
+      classification.news_score < 0.50 ||
+      classification.news_score <= classification.non_news_score
     )
   ) {
     return {
-      verdict: "non_news",
-      confidence: classification.score || 0.95,
-      explanation: "المحتوى لا يبدو خبراً، لذلك تم تخطي البحث الإخباري.",
-      sources: []
+      verdict:     "non_news",
+      confidence:  classification?.non_news_score ?? 0.9,
+      explanation: "💬 هذا محتوى غير إخباري",
+      sources:     []
     };
   }
 
-  // Extract keywords
-  const keywords = extractKeywords(text);
-
-  if (!keywords) {
-    return result(
-      "unverified",
-      0.2,
-      "لا توجد كلمات مفتاحية كافية للبحث",
-      []
-    );
+  // ── null classification → fail open, continue to search ──
+  if (!classification) {
+    console.warn("[HAQQ] Classification failed — continuing to search anyway");
   }
+  // ── 3. IS NEWS → extract keywords ─────────────────────
+  const keywords = extractKeywords(text);
+  console.log("[HAQQ] Keywords:", keywords, "| length:", keywords?.length);
 
-  // Cache key
-  const cKey = "text::" + keywords;
+  if (!keywords)
+    return result("unverified", 0.2, "لا توجد كلمات مفتاحية", []);
 
-  if (cache.has(cKey))
-    return cache.get(cKey);
+  const kwCount = keywords.trim().split(/\s+/).length;
+  if (kwCount < 2)
+    return result("unverified", 0.2, "الكلمات المفتاحية غير كافية للبحث", []);
 
-  if (inFlight.has(cKey))
-    return inFlight.get(cKey);
+  const searchQuery = keywords.length <= 85
+    ? keywords
+    : keywords.slice(0, 85).replace(/\s\S*$/, "").trim();
 
+  console.log("[HAQQ] Search query:", searchQuery);
+
+  // ── 4. CACHE ──────────────────────────────────────────
+  const cKey = "text::" + normalise(text).slice(0, 100);
+  if (cache.has(cKey))    return cache.get(cKey);
+  if (inFlight.has(cKey)) return inFlight.get(cKey);
+
+  // ── 5. SEARCH ─────────────────────────────────────────
   const promise = (async () => {
-    console.log("[HAQQ] Searching news for:", keywords);
+    console.log("[HAQQ] Searching:", searchQuery);
     console.log("[HAQQ] Language:", lang);
 
     let articles = [];
-
     if (lang === "ar") {
-      const [ndAr, fnAr] = await Promise.all([
-        fetchNewsData(keywords, "ar"),
-        fetchFreeNews(keywords, "ar")
+      const [ndAr, curAr, gnAr] = await Promise.all([
+        fetchNewsData(searchQuery, "ar"),
+        fetchCurrents(searchQuery, "ar"),
+        fetchGNews(searchQuery, "ar"),
       ]);
 
-      articles = [...ndAr, ...fnAr];
+      console.group("[HAQQ] Articles (ar)");
+      console.log(`📰 NewsData (${ndAr.length})`, ndAr.map(a => ({ title: a.title, source: a.source_id })));
+      console.log(`📰 Currents (${curAr.length})`, curAr.map(a => ({ title: a.title, source: a.source_name })));
+      console.log(`📰 GNews   (${gnAr.length})`, gnAr.map(a => ({ title: a.title, source: a.source_name })));
+      console.groupEnd();
 
-    } else {
-      const [ndEn, fnEn] = await Promise.all([
-        fetchNewsData(keywords, "en"),
-        fetchFreeNews(keywords, "en")
+      articles = [...ndAr, ...curAr, ...gnAr];
+
+      if (articles.length === 0) {
+        console.log("[HAQQ] Still empty — trying GDELT...");
+        articles = await fetchGDELT(searchQuery, "ar");
+      }
+   } else {
+      const [ndEn, curEn, gnEn] = await Promise.all([
+        fetchNewsData(searchQuery, "en"),
+        fetchCurrents(searchQuery, "en"),
+        fetchGNews(searchQuery, "en"),
       ]);
 
-      articles = [...ndEn, ...fnEn];
+      console.group("[HAQQ] Articles (en)");
+      console.log(`📰 NewsData (${ndEn.length})`, ndEn.map(a => ({ title: a.title, source: a.source_id })));
+      console.log(`📰 Currents (${curEn.length})`, curEn.map(a => ({ title: a.title, source: a.source_name })));
+      console.log(`📰 GNews   (${gnEn.length})`, gnEn.map(a => ({ title: a.title, source: a.source_name })));
+      console.groupEnd();
+
+      articles = [...ndEn, ...curEn, ...gnEn];
+
+      if (articles.length === 0) {
+        console.log("[HAQQ] Empty — trying GDELT...");
+        articles = await fetchGDELT(searchQuery, "en");
+      }
     }
+    console.log("[HAQQ] Total articles:", articles.length);
 
-    console.log("[HAQQ] Total articles found:", articles.length);
-
-    const out = scoreArticles(text, keywords, articles);
+    const out         = scoreArticles(text, searchQuery, articles);
+    out._cKey         = cKey;
+    out._originalText = text;
 
     cache.set(cKey, out);
     inFlight.delete(cKey);
-
     stats.total++;
-    stats[out.verdict] =
-      (stats[out.verdict] || 0) + 1;
-
+    stats[out.verdict] = (stats[out.verdict] || 0) + 1;
     return out;
   })();
 
   inFlight.set(cKey, promise);
-
   return promise;
 }
+
 
 async function verifyImage({ imageUrl }) {
   const keywords = keywordsFromUrl(imageUrl);
@@ -235,7 +270,79 @@ async function verifyVideo({ text, videoPoster, videoUrl }) {
   if (videoUrl)    return verifyImage({ imageUrl: videoUrl });
   return result("unverified", 0.2, "⚠️ الفيديو يحتاج وصفاً نصياً للتحقق", []);
 }
+// ─── GDELT FETCH ──────────────────────────────────────────
+// ─── GDELT throttle ───────────────────────────────────────
+let _gdeltQueue = Promise.resolve();
 
+async function fetchGDELT(query, lang) {
+  _gdeltQueue = _gdeltQueue.then(() => _fetchGDELTInner(query, lang));
+  return _gdeltQueue;
+}
+
+async function _fetchGDELTInner(query, lang) {
+  // ── Read last call time from storage (survives SW restart) ──
+  const stored     = await chrome.storage.session.get("gdeltLastCall");
+  const lastCall   = stored.gdeltLastCall || 0;
+  const now        = Date.now();
+  const wait       = 6500 - (now - lastCall);   // ← 6.5s to be safe
+
+  if (wait > 0) {
+    console.log(`[HAQQ] GDELT throttle — waiting ${Math.round(wait / 1000)}s...`);
+    await new Promise(r => setTimeout(r, wait));
+  }
+
+  // ── Save call time before fetching ───────────────────
+  await chrome.storage.session.set({ gdeltLastCall: Date.now() });
+
+  const safeQuery = query.slice(0, 75).replace(/\s\S*$/, "").trim();
+  console.log(`[HAQQ] GDELT query: "${safeQuery}" (${safeQuery.length} chars)`);
+
+  if (safeQuery.length < 4) {
+    console.warn("[HAQQ] GDELT query too short — skipping");
+    return [];
+  }
+
+  const url = new URL("https://api.gdeltproject.org/api/v2/doc/doc");
+  url.searchParams.set("query",      lang === "ar" ? safeQuery + " sourcelang:arabic" : safeQuery);
+  url.searchParams.set("mode",       "artlist");
+  url.searchParams.set("format",     "json");
+  url.searchParams.set("maxrecords", "10");
+  url.searchParams.set("sort",       "hybridrel");
+
+  try {
+    const res         = await fetch(url);
+    const contentType = res.headers.get("content-type") || "";
+
+    if (!res.ok || !contentType.includes("application/json")) {
+      const msg = await res.text();
+      console.warn("[HAQQ] GDELT error:", msg.slice(0, 120));
+
+      if (msg.includes("limit") || msg.includes("5 seconds")) {
+        // Back off — set last call to now so next call waits full 6.5s
+        await chrome.storage.session.set({ gdeltLastCall: Date.now() });
+      }
+      return [];
+    }
+
+    const data = await res.json();
+    if (!data.articles) return [];
+
+    console.log(`[HAQQ] GDELT got ${data.articles.length} articles`);
+
+    return data.articles.map(a => ({
+      title:       a.title  || "",
+      description: "",
+      link:        a.url    || "#",
+      source_id:   a.domain || "",
+      source_name: a.domain || "",
+      _api:        "gdelt"
+    }));
+
+  } catch (e) {
+    console.warn("[HAQQ] GDELT fetch error:", e.message);
+    return [];
+  }
+}
 // ─── NEWSDATA FETCH ───────────────────────────────────────
 async function fetchNewsData(query, lang) {
   const url = new URL(NEWSDATA_BASE);
@@ -247,32 +354,100 @@ async function fetchNewsData(query, lang) {
   try {
     const res  = await fetch(url);
     const data = await res.json();
+
+    // ── Log full response so we can see the real error ───
+    console.log("[HAQQ] NewsData full response:", JSON.stringify(data).slice(0, 300));
+
     if (data.status === "error") {
-      console.warn("[HAQQ] NewsData error:", data.message);
+      console.warn("[HAQQ] NewsData error:", 
+        data.message        ||
+        data.results?.message ||
+        data.results?.code    ||
+        JSON.stringify(data)
+      );
       return [];
     }
+
+    console.log(`[HAQQ] NewsData got ${(data.results || []).length} articles`);
     return data.results || [];
+
   } catch (e) {
     console.error("[HAQQ] NewsData fetch error:", e.message);
     return [];
   }
 }
 
-async function fetchFreeNews(query, lang) {
-  const url = new URL("https://api.freenewsapi.io/v1/news");
-  url.searchParams.set("q",        query);
+
+// ─── CURRENTS API ─────────────────────────────────────────
+async function fetchCurrents(query, lang) {
+  const url = new URL("https://api.currentsapi.services/v1/search");
+  url.searchParams.set("apiKey",   CURRENTS_API_KEY);
+  url.searchParams.set("keywords", query);
   url.searchParams.set("language", lang);
   url.searchParams.set("limit",    "10");
 
   try {
+    const res  = await fetch(url);
+    const data = await res.json();
+    if (!data.news) return [];
+    return data.news.map(a => ({
+      title:       a.title       || "",
+      description: a.description || "",
+      link:        a.url         || "#",
+      source_id:   a.author      || "",
+      source_name: a.author      || "",
+      _api:        "currents"
+    }));
+  } catch (e) {
+    console.warn("[HAQQ] Currents fetch error:", e.message);
+    return [];
+  }
+}
+
+// ─── GNEWS API ────────────────────────────────────────────
+async function fetchGNews(query, lang) {
+  const url = new URL("https://gnews.io/api/v4/search");
+  url.searchParams.set("token",    GNEWS_API_KEY);
+  url.searchParams.set("q",        query);
+  url.searchParams.set("lang",     lang);
+  url.searchParams.set("max",      "10");
+
+  try {
+    const res  = await fetch(url);
+    const data = await res.json();
+    if (!data.articles) return [];
+    return data.articles.map(a => ({
+      title:       a.title                 || "",
+      description: a.description           || "",
+      link:        a.url                   || "#",
+      source_id:   a.source?.name?.toLowerCase() || "",
+      source_name: a.source?.name          || "",
+      _api:        "gnews"
+    }));
+  } catch (e) {
+    console.warn("[HAQQ] GNews fetch error:", e.message);
+    return [];
+  }
+}
+async function fetchFreeNews(query, lang) {
+  const url = new URL(FREENEWS_BASE);
+  url.searchParams.set("q",        query);
+  url.searchParams.set("language", lang);
+  url.searchParams.set("limit",    "10");
+
+  // FIX: 5s timeout — if FreeNews doesn't respond, skip it silently
+  const controller = new AbortController();
+  const timer      = setTimeout(() => controller.abort(), 10000);
+
+  try {
     const res  = await fetch(url, {
-      headers: {
-        "x-api-key": FREENEWS_API_KEY
-      }
+      headers: { "x-api-key": FREENEWS_API_KEY },
+      signal:  controller.signal
     });
+    clearTimeout(timer);
+
     const data = await res.json();
     console.log("[HAQQ] FreeNews raw response:", data);
-
     if (!data.articles) return [];
 
     return data.articles.map(a => ({
@@ -281,10 +456,15 @@ async function fetchFreeNews(query, lang) {
       link:        a.url         || "#",
       source_id:   a.source?.id   || "",
       source_name: a.source?.name || "",
-      _api: "freenews"
+      _api:        "freenews"
     }));
+
   } catch (e) {
-    console.error("[HAQQ] FreeNews fetch error:", e.message);
+    clearTimeout(timer);
+    if (e.name === "AbortError")
+      console.warn("[HAQQ] FreeNews timed out — skipping");
+    else
+      console.error("[HAQQ] FreeNews fetch error:", e.message);
     return [];
   }
 }
@@ -336,7 +516,18 @@ function extractKeywords(text) {
   const tokens = normalise(text)
     .split(/\s+/)
     .filter(w => w.length > 3 && !STOPS.has(w));
-  return [...new Set(tokens)].slice(0, 5).join(" ");
+
+  const words = [...new Set(tokens)];
+  let query   = "";
+
+  for (const word of words) {
+    const next = query ? `${query} ${word}` : word;
+    if (next.length > 95) break;   // ← hard stop at 85 chars
+    query = next;
+  }
+
+  console.log("[HAQQ] Keywords built:", query, "| length:", query.length);
+  return query || null;
 }
 
 function keywordsFromUrl(url) {

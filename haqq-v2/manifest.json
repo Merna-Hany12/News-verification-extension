@@ -17,7 +17,10 @@
     "https://newsdata.io/*",
     "https://api.freenewsapi.io/*",
     "https://*.ngrok-free.dev/*",
-    "https://*.ngrok-free.app/*"
+    "https://*.ngrok-free.app/*",
+    "https://api.gdeltproject.org/*",
+    "https://api.currentsapi.services/*",
+    "https://gnews.io/*"
   ],
 
   "background": {

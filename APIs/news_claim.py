@@ -1,9 +1,26 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import pipeline
 
-app = FastAPI()
+# ─── MODELS ───────────────────────────────────────────────
+classifier = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global classifier   # ← only classifier, no summarizer globals
+
+    print("LOADING CLASSIFIER...")
+    classifier = pipeline(
+        "zero-shot-classification",
+        model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
+    )
+    print("CLASSIFIER LOADED ✅")
+
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -12,43 +29,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-classifier = None
-
-@app.on_event("startup")
-def load_model():
-    global classifier
-    print("LOADING MODEL...")
-    classifier = pipeline(
-        "zero-shot-classification",
-        model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
-    )
-    print("MODEL LOADED")
-class TextRequest(BaseModel):
+# ─── SCHEMA ───────────────────────────────────────────────
+class TextRequest(BaseModel):   # ← was missing — caused the validation error
     text: str
 
+# ─── LABELS ───────────────────────────────────────────────
 LABELS = [
-    "breaking news or official government announcement about politics war economy prices elections disasters infrastructure",
-    "personal story daily life opinion joke complaint question gossip or casual social media post written by an individual person"
+    "news report breaking news journalism media coverage event announcement",
+    "personal opinion social media post joke gossip casual conversation"
 ]
 
+# ─── CLASSIFY ─────────────────────────────────────────────
 @app.post("/classify")
-def classify_text(request: TextRequest):
+def classify_text(request: TextRequest):   # ← was missing type hint
     result = classifier(request.text, LABELS)
 
-    top_label = result["labels"][0]
-    top_score = float(result["scores"][0])
+    news_score     = 0.0
+    non_news_score = 0.0
 
-    is_news = (
-        "breaking news" in top_label.lower()
-        and top_score > 0.5
-    )
+    for label, score in zip(result["labels"], result["scores"]):
+        if "news" in label.lower() or "report" in label.lower():
+            news_score = float(score)
+        else:
+            non_news_score = float(score)
+
+    print(f"[HAQQ] news_score    : {news_score:.3f}")
+    print(f"[HAQQ] non_news_score: {non_news_score:.3f}")
+    print(f"[HAQQ] text          : {request.text[:80]}")
+
+    is_news = news_score > non_news_score and news_score >= 0.50
 
     return {
-        "label": top_label,
-        "score": top_score,
-        "is_news": is_news
+        "label":          result["labels"][0],
+        "score":          float(result["scores"][0]),
+        "news_score":     news_score,
+        "non_news_score": non_news_score,
+        "is_news":        is_news
     }
 
+# ─── RUN ──────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)

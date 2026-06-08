@@ -20,30 +20,23 @@ function isValidPost(el) {
   }
   if (el.querySelector('[data-visualcompletion="loading-state"]')) return false;
   if (el.querySelector('[aria-label="Loading..."]')) return false;
-  // REMOVED the hasActions check — buttons load late, don't gate on them
   if (!el.innerText || el.innerText.trim().length < 10) return false;
   return true;
 }
-
 
 // ─── EXTRACT ──────────────────────────────────────────────
 function extractAll(postEl) {
   const out = { text: null, imageUrl: null, videoUrl: null, videoPoster: null };
 
-  // ── Expand "See more" before extracting text ──────────
   for (const btn of postEl.querySelectorAll([
     '[role="button"][tabindex="0"]',
     'div[role="button"]',
     'span[role="button"]',
   ].join(","))) {
     const t = btn.innerText?.trim();
-    if (t === "See more" || t === "اقرأ المزيد" || t === "See More") {
-      btn.click();
-    }
+    if (t === "See more" || t === "اقرأ المزيد" || t === "See More") btn.click();
   }
-  // ──────────────────────────────────────────────────────
 
-  // Text: use innerText on the message container
   const msgEl =
     postEl.querySelector('[data-ad-comet-preview="message"]') ||
     postEl.querySelector('[data-ad-preview="message"]')       ||
@@ -54,26 +47,23 @@ function extractAll(postEl) {
     if (t && t.length > 10) out.text = t.slice(0, 3000);
   }
 
-  // Fallback text
   if (!out.text) {
     for (const b of postEl.querySelectorAll('[dir="auto"]')) {
       const t = b.textContent?.trim().replace(/\n+/g, " ");
       if (t && t.length > 30) { out.text = t.slice(0, 3000); break; }
     }
   }
-  // Video: FB lazy-loads src, poster is always available
+
   const vid = postEl.querySelector("video");
   if (vid) {
-    const src = vid.src || vid.currentSrc || "";
+    const src    = vid.src || vid.currentSrc || "";
     const poster = vid.getAttribute("poster") || "";
     if (src && !src.startsWith("blob:") && src.length > 10) out.videoUrl = src;
     if (poster) out.videoPoster = poster;
-    // Use poster as video proxy so button always shows for video posts
     if (!out.videoUrl && poster) out.videoUrl = poster;
     log("Video — src:", src.slice(0, 60), "| poster:", poster.slice(0, 60));
   }
 
-  // Image: skip UI assets, profile pics, video posters already captured
   for (const img of postEl.querySelectorAll("img[src]")) {
     const src = img.src || "";
     if (!src || src.startsWith("data:")) continue;
@@ -123,34 +113,32 @@ function buildToolbar(postEl, content) {
 }
 
 const BTN_DEF = {
-  text:  { label: "📝 نص",    title: "تحقق من صحة النص"   },
-  image: { label: "🖼️ صورة", title: "تحليل الصورة"        },
-  video: { label: "🎬 فيديو", title: "تحليل الفيديو"       },
+  text:  { label: "📝 نص",    title: "تحقق من صحة النص" },
+  image: { label: "🖼️ صورة", title: "تحليل الصورة"      },
+  video: { label: "🎬 فيديو", title: "تحليل الفيديو"     },
 };
 
 function makeBtn(type, postEl, content) {
   const def = BTN_DEF[type];
 
   const btn = document.createElement("button");
-  btn.className = `haqq-btn haqq-btn--${type}`;
-  btn.dataset.type = type;
+  btn.className       = `haqq-btn haqq-btn--${type}`;
+  btn.dataset.type    = type;
   btn.dataset.loading = "false";
-
-  btn.innerHTML = def.label;
-  btn.title = def.title;
+  btn.innerHTML       = def.label;
+  btn.title           = def.title;
 
   const setLoading = () => {
     btn.classList.add("haqq-btn--loading");
-    btn.dataset.original = btn.innerHTML;
-    btn.innerHTML = `<span class="haqq-spinner"></span>`;
-    btn.disabled = true;
+    btn.innerHTML       = `<span class="haqq-spinner"></span>`;
+    btn.disabled        = true;
     btn.dataset.loading = "true";
   };
 
   const setIdle = () => {
     btn.classList.remove("haqq-btn--loading", "haqq-btn--error");
-    btn.innerHTML = def.label;
-    btn.disabled = false;
+    btn.innerHTML       = def.label;
+    btn.disabled        = false;
     btn.dataset.loading = "false";
   };
 
@@ -158,59 +146,43 @@ function makeBtn(type, postEl, content) {
     btn.classList.remove("haqq-btn--loading");
     btn.classList.add("haqq-btn--error");
     btn.innerHTML = "⚠️";
-    btn.title = message;
-
-    setTimeout(() => {
-      setIdle();
-      btn.title = def.title;
-    }, 3000);
-  };
-
-  const waitForContentUpdate = async (el, timeout = 1500) => {
-    const start = Date.now();
-    let last = extractAll(el);
-
-    while (Date.now() - start < timeout) {
-      await new Promise((r) => setTimeout(r, 150));
-
-      const current = extractAll(el);
-      if (
-        current.text !== last.text ||
-        current.imageUrl !== last.imageUrl ||
-        current.videoUrl !== last.videoUrl
-      ) {
-        last = current;
-      } else {
-        return current;
-      }
-    }
-
-    return last;
+    btn.title     = message;
+    setTimeout(() => { setIdle(); btn.title = def.title; }, 3000);
   };
 
   btn.addEventListener("click", async () => {
     if (btn.dataset.loading === "true") return;
-
     setLoading();
 
     try {
-      const freshContent = await waitForContentUpdate(postEl);
+      // FIX: removed waitForContentUpdate — it added up to 1500ms of
+      // unnecessary delay on every click. Content is re-extracted fresh here.
+      const freshContent = extractAll(postEl);
 
       const finalContent = {
-        text: freshContent.text ?? content.text,
-        imageUrl: freshContent.imageUrl ?? content.imageUrl,
-        videoUrl: freshContent.videoUrl ?? content.videoUrl,
+        text:        freshContent.text        ?? content.text,
+        imageUrl:    freshContent.imageUrl    ?? content.imageUrl,
+        videoUrl:    freshContent.videoUrl    ?? content.videoUrl,
         videoPoster: freshContent.videoPoster ?? content.videoPoster,
       };
 
-      const result = await sendToBackground(type, finalContent, postEl);
+      const result = await sendToBackground(type, finalContent);
+      if (!result) throw new Error("لا استجابة من الخادم");
+
+      // FIX: handle non_news verdict cleanly — show a dismissible info badge
+      // instead of falling through to the unverified config silently.
+      if (result.verdict === "non_news") {
+        showNonNews(postEl, btn, type);
+        return;
+      }
 
       showVerdict(postEl, result, type, btn);
+
     } catch (err) {
       setError(err?.message || "Something went wrong");
     } finally {
-      // تأمين إضافي ضد أي تعليق
-      if (!btn.classList.contains("haqq-btn--error")) {
+      if (!btn.classList.contains("haqq-btn--error") &&
+          !btn.classList.contains("haqq-btn--done")) {
         setIdle();
       }
     }
@@ -218,84 +190,68 @@ function makeBtn(type, postEl, content) {
 
   return btn;
 }
+
+// ─── LANGUAGE DETECTION ───────────────────────────────────
 function detectLanguage(text) {
   const arabicChars  = (text.match(/[\u0600-\u06FF]/g) || []).length;
-  const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+  const englishChars = (text.match(/[a-zA-Z]/g)        || []).length;
   const total        = arabicChars + englishChars;
   if (total === 0) return "en";
-  if (arabicChars / total >= 0.5) return "ar";
-  return "en";
+  return arabicChars / total >= 0.5 ? "ar" : "en";
 }
+
+// ─── TEXT CLEANING ────────────────────────────────────────
+function cleanText(raw) {
+  return raw
+    .toLowerCase()
+    .replace(/#\w+/g, " ")
+    .replace(/@\w+/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/see more|see less|اقرأ المزيد|read more/gi, " ")
+    .replace(/see original|rate this translation|show more/gi, " ")
+    .replace(/[·•]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // ─── BACKGROUND MESSAGES ──────────────────────────────────
+// FIX: removed the duplicate AI classification call that was here before.
+// The service worker's verifyText already classifies internally — doing it
+// again in the content script added a full model round-trip of latency
+// before even starting the news search.
+// FIX: fixed function signature — was (type, content, postEl) but postEl
+// was never used inside. Now correctly (type, content).
 async function sendToBackground(type, content) {
 
-  // ── TEXT: AI filter first via background ───────────────
   if (type === "text" && content.text) {
+    const text = cleanText(content.text);
+    const lang = detectLanguage(text);
+    log("Detected language:", lang);
 
-    // Clean text once and use everywhere
-    const cleanText = content.text
-      .replace(/\n+/g, " ")
-      .replace(/\s+/g, " ")
-      .replace(/see more/gi, "")
-      .replace(/see less/gi, "")
-      .replace(/اقرأ المزيد/g, "")
-      .replace(/see original/gi, "")
-      .replace(/rate this translation/gi, "")
-      .replace(/read more[^]*/gi, "")        // remove "Read more" and everything after
-      .replace(/https?:\/\/\S+/g, "")        // remove all URLs
-      .replace(/·/g, "")
-      .trim();
-
-    const ai = await new Promise((resolve) => {
-      const t = setTimeout(() => resolve(null), 8000);
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 25000);
       chrome.runtime.sendMessage(
-        { type: "HAQQ_CLASSIFY_AI", payload: { text: cleanText } },
+        { type: "HAQQ_VERIFY_TEXT", payload: { text, lang } },
         (res) => {
           clearTimeout(t);
-          if (chrome.runtime.lastError) return resolve(null);
-          resolve(res?.data || null);
+          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+          if (!res)      return reject(new Error("لا استجابة"));
+          if (res.error) return reject(new Error(res.error));
+          resolve(res.data);
         }
       );
     });
-
-    console.log("[HAQQ] AI result:", ai);
-
-    if (!ai) {
-      // AI unreachable — fall through to NewsData
-    } else if (!ai.is_news && ai.score > 0.75) {
-      return {
-        verdict: "unverified",
-        confidence: ai.score,
-        explanation: "💬 هذا المحتوى يبدو رأياً شخصياً وليس خبراً قابلاً للتحقق",
-        sources: []
-      };
-    } 
-    // ai.is_news === true → fall through to NewsData with cleanText
-    const lang = detectLanguage(cleanText);
-    console.log("[HAQQ] Detected language:", lang);
-
-    const msg = {
-      type: "HAQQ_VERIFY_TEXT",
-      payload: { text: cleanText, lang }  // ← now passes lang
-    };
-    return new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 25000);
-      chrome.runtime.sendMessage(msg, (res) => {
-        clearTimeout(t);
-        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-        if (!res)      return reject(new Error("لا استجابة"));
-        if (res.error) return reject(new Error(res.error));
-        resolve(res.data);
-      });
-    });
   }
 
-  // ── IMAGE / VIDEO: go straight to background ───────────
   const msg = {
-    image: { type: "HAQQ_VERIFY_IMAGE", payload: { imageUrl: content.imageUrl } },
-    video: { type: "HAQQ_VERIFY_VIDEO", payload: {
-      videoUrl: content.videoUrl, videoPoster: content.videoPoster, text: content.text
-    }},
+    image: {
+      type:    "HAQQ_VERIFY_IMAGE",
+      payload: { imageUrl: content.imageUrl }
+    },
+    video: {
+      type:    "HAQQ_VERIFY_VIDEO",
+      payload: { videoUrl: content.videoUrl, videoPoster: content.videoPoster, text: content.text }
+    },
   }[type];
 
   return new Promise((resolve, reject) => {
@@ -309,9 +265,53 @@ async function sendToBackground(type, content) {
     });
   });
 }
+
+// ─── NON-NEWS BADGE ───────────────────────────────────────
+// FIX: non_news was missing from VERDICT_CFG so it silently fell through
+// to "unverified" and showed a confusing badge. Now it gets its own clean
+// dismissible notice instead.
+function showNonNews(postEl, btn, type) {
+  postEl.querySelector(`.haqq-badge[data-type="${type}"]`)?.remove();
+
+  const badge = document.createElement("div");
+  badge.className    = "haqq-badge haqq-badge--nonnews";
+  badge.dataset.type = type;
+  badge.innerHTML = `
+    <div class="haqq-badge-bar">
+      <span class="haqq-badge-typename">${TYPE_NAMES[type]}</span>
+      <span class="haqq-badge-verdict">💬 ليس خبراً</span>
+      <span class="haqq-badge-right">
+        <button class="haqq-dismiss" aria-label="إغلاق">✕</button>
+      </span>
+    </div>
+    <p class="haqq-badge-expl">هذا المحتوى رأي شخصي أو محادثة — لا يحتاج تحققاً إخبارياً.</p>
+  `;
+
+  badge.querySelector(".haqq-dismiss").addEventListener("click", () => {
+    badge.remove();
+    btn.classList.remove("haqq-btn--done");
+    btn.innerHTML = BTN_DEF[type].label;
+    btn.disabled  = false;
+  });
+
+  btn.classList.remove("haqq-btn--loading");
+  btn.classList.add("haqq-btn--done");
+  btn.innerHTML = "💬";
+  btn.disabled  = false;
+
+  const toolbar = postEl.querySelector(".haqq-toolbar");
+  toolbar
+    ? toolbar.parentElement?.insertBefore(badge, toolbar)
+    : postEl.insertBefore(badge, postEl.firstChild);
+}
+
 // ─── INSERT TOOLBAR ───────────────────────────────────────
 function insertToolbar(postEl, toolbar) {
-  for (const sel of ['[aria-label="Leave a comment"]','[aria-label="Comment"]','[aria-label="Like"]']) {
+  for (const sel of [
+    '[aria-label="Leave a comment"]',
+    '[aria-label="Comment"]',
+    '[aria-label="Like"]'
+  ]) {
     const btn = postEl.querySelector(sel);
     if (!btn) continue;
     let node = btn.parentElement;
@@ -328,11 +328,11 @@ function insertToolbar(postEl, toolbar) {
 
 // ─── VERDICT BADGE ────────────────────────────────────────
 const VERDICT_CFG = {
-  fact:         { ar: "✅ موثوق",                      cls: "fact",         icon: "✅" },
-  verified:     { ar: "✅ موثوق",                      cls: "fact",         icon: "✅" },
-  unverified:   { ar: "⚠️ غير مؤكد",                  cls: "unverified",   icon: "⚠️" },
-  fake:         { ar: "❌ مضلل على الأرجح",            cls: "fake",         icon: "❌" },
-  ai_generated: { ar: "🤖 مُولَّد بالذكاء الاصطناعي", cls: "ai",           icon: "🤖" },
+  fact:         { ar: "✅ موثوق",                      cls: "fact",       icon: "✅" },
+  verified:     { ar: "✅ موثوق",                      cls: "fact",       icon: "✅" },
+  unverified:   { ar: "⚠️ غير مؤكد",                  cls: "unverified", icon: "⚠️" },
+  fake:         { ar: "❌ مضلل على الأرجح",            cls: "fake",       icon: "❌" },
+  ai_generated: { ar: "🤖 مُولَّد بالذكاء الاصطناعي", cls: "ai",         icon: "🤖" },
 };
 const TYPE_NAMES = { text: "النص", image: "الصورة", video: "الفيديو" };
 
@@ -344,7 +344,6 @@ function showVerdict(postEl, result, type, btn) {
   const name = TYPE_NAMES[type];
 
   const sourcesHtml = (result.sources || [])
-    .slice(0, 5)
     .map(s => {
       try {
         const url   = s.url || s;
@@ -375,7 +374,10 @@ function showVerdict(postEl, result, type, btn) {
       ? `<p class="haqq-badge-expl">${escapeHtml(result.explanation)}</p>`
       : ""}
     ${sourcesHtml
-      ? `<div class="haqq-sources"><span class="haqq-src-lbl">📎 المصادر</span><div class="haqq-src-list">${sourcesHtml}</div></div>`
+      ? `<div class="haqq-sources">
+           <span class="haqq-src-lbl">📎 المصادر</span>
+           <div class="haqq-src-list">${sourcesHtml}</div>
+         </div>`
       : ""}
   `;
 
@@ -399,10 +401,25 @@ function showVerdict(postEl, result, type, btn) {
 
 // ─── HELPERS ──────────────────────────────────────────────
 function escapeHtml(s = "") {
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  return s
+    .replace(/&/g,  "&amp;")
+    .replace(/</g,  "&lt;")
+    .replace(/>/g,  "&gt;")
+    .replace(/"/g,  "&quot;");
 }
 
-// ─── SCAN + OBSERVER ──────────────────────────────────────
+function normalise(str) {
+  return str
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670\u0671\u0640]/g, "")
+    .replace(/[آأإٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/[^\u0600-\u06FFa-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // ─── SCAN + OBSERVER ──────────────────────────────────────
 function scanForPosts() {
   let n = 0;
