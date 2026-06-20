@@ -243,11 +243,73 @@ async function sendToBackground(type, content) {
     });
   }
 
+  // ─── IMAGE: try OCR first to extract text written inside the image.
+  //     If text is found → run the same HAQQ_VERIFY_TEXT pipeline used
+  //     for normal post text. If no text → fall back to the original
+  //     HAQQ_VERIFY_IMAGE (URL-keyword search). Nothing else changes.
+  if (type === "image" && content.imageUrl) {
+    let ocrText = "";
+    try {
+      const ocrRes = await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("timeout")), 30000);
+        chrome.runtime.sendMessage(
+          { type: "HAQQ_OCR_IMAGE", payload: { imageUrl: content.imageUrl } },
+          (res) => {
+            clearTimeout(t);
+            if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+            if (!res || res.error)        return resolve("");
+            resolve(res.data?.text || "");
+          }
+        );
+      });
+      ocrText = ocrRes.trim();
+    } catch { ocrText = ""; }
+
+    if (ocrText.length >= 10) {
+      // OCR succeeded — log full extracted text before passing to pipeline
+      const text = cleanText(ocrText);
+      const lang = detectLanguage(text);
+
+      console.log("%c━━━━━━━━━━ [HAQQ] OCR RESULT ━━━━━━━━━━", "color:#f59e0b;font-weight:bold");
+      console.log("[HAQQ] 🔤 OCR RAW TEXT  :", ocrText);
+      console.log("[HAQQ] 🧹 CLEANED TEXT  :", text);
+      console.log("[HAQQ] 📏 LENGTH        :", text.length, "chars");
+      console.log("[HAQQ] 🌐 LANGUAGE      :", lang);
+      console.log("%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "color:#f59e0b;font-weight:bold");
+
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 25000);
+        chrome.runtime.sendMessage(
+          { type: "HAQQ_VERIFY_TEXT", payload: { text, lang } },
+          (res) => {
+            clearTimeout(t);
+            if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+            if (!res)      return reject(new Error("لا استجابة"));
+            if (res.error) return reject(new Error(res.error));
+            resolve(res.data);
+          }
+        );
+      });
+    }
+
+    // No readable text in image — fall back to original URL-keyword search
+    log("No OCR text found — falling back to image URL search");
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 25000);
+      chrome.runtime.sendMessage(
+        { type: "HAQQ_VERIFY_IMAGE", payload: { imageUrl: content.imageUrl } },
+        (res) => {
+          clearTimeout(t);
+          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+          if (!res)      return reject(new Error("لا استجابة"));
+          if (res.error) return reject(new Error(res.error));
+          resolve(res.data);
+        }
+      );
+    });
+  }
+
   const msg = {
-    image: {
-      type:    "HAQQ_VERIFY_IMAGE",
-      payload: { imageUrl: content.imageUrl }
-    },
     video: {
       type:    "HAQQ_VERIFY_VIDEO",
       payload: { videoUrl: content.videoUrl, videoPoster: content.videoPoster, text: content.text }
