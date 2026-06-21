@@ -1,4 +1,4 @@
-// ─── HAQQ Background Service Worker v8 (NewsData.io) ─────
+// ─── HAQQ Background Service Worker v9 (NewsData.io + Search Fallback) ─────
 import { CONFIG } from "./config.js";
 const NEWSDATA_API_KEY = CONFIG.NEWSDATA_API_KEY;
 const FREENEWS_API_KEY = CONFIG.FREENEWS_API_KEY;
@@ -35,14 +35,42 @@ const TRUSTED = [
   "middleeasteye","arabicpost","atalayar"
 ];
 
-// ─── ARABIC STOP WORDS ────────────────────────────────────
-const STOPS = new Set([
+// ─── STOP WORDS (Arabic + English) ────────────────────────
+// Filtered together regardless of detected language — Arabic news
+// text on Facebook is frequently code-switched with English words
+// and names, so filtering against only one list let the other
+// language's filler words slip into the search query.
+const STOPS_AR = new Set([
+  // pronouns / demonstratives / connectors
   "في","من","على","إلى","عن","مع","هذا","هذه","ذلك","تلك",
   "التي","الذي","وهو","وهي","كان","كانت","أن","إن","لكن",
   "كما","حيث","بعد","قبل","عند","حتى","هل","لا","نعم","كل",
   "بين","غير","عبر","خلال","حول","ضد","أو","ثم","لم","لن",
   "قد","فقد","وقد","منذ","إذا","إذ","بما","مما","فمن","وفي",
-  "وعلى","ومع","وإن","أما","بل","فإن","ولا","وهذا","وهذه"
+  "وعلى","ومع","وإن","أما","بل","فإن","ولا","وهذا","وهذه",
+  // additional connectors / demonstratives / fillers
+  "هناك","هنا","أيضا","ايضا","لذلك","لذا","عندما","كذلك",
+  "سوف","لقد","إلا","سوى","معه","معها","منه","منها",
+  "إليه","إليها","عليه","عليها","فيه","فيها","لهذا","لهذه",
+  // newswire reporting verbs/phrasing — present in nearly every
+  // article regardless of topic, so they dilute search specificity
+  "قال","قالت","وقال","وقالت","أضاف","أضافت","وأضاف","وأضافت",
+  "أعلن","أعلنت","وأعلن","وأعلنت","ذكر","ذكرت","وذكر","وذكرت",
+  "أكد","أكدت","وأكد","وأكدت","أشار","أشارت","وأشار","وأشارت",
+  "بحسب","وفقا","وفقاً","حسب","تابع","تابعت","أوضح","أوضحت"
+]);
+
+const STOPS_EN = new Set([
+  "this","that","these","those","with","from","have","has","had",
+  "been","were","also","into","over","under","more","most",
+  "some","such","than","then","when","where","which","what","while",
+  "during","after","before","about","because","through","among",
+  "between","against","without","within","upon","said","says",
+  "according","reported","reportedly","officials","statement",
+  "including","their","there","here","will","would","could","should",
+  "they","them","your","just","like","make","made","being","still",
+  "only","very","much","many","each","both","other","another",
+  "first","last","year","years","time","news"
 ]);
 
 // ─── ROUTER ───────────────────────────────────────────────
@@ -195,8 +223,8 @@ async function verifyText({ text, lang }) {
       articles = [...ndAr, ...curAr, ...gnAr];
 
       if (articles.length === 0) {
-        console.log("[HAQQ] Still empty — trying GDELT...");
-        articles = await fetchGDELT(searchQuery, "ar");
+        console.log("[HAQQ] Still empty — trying search engine fallback...");
+        articles = await fetchSearchFallback(searchQuery, "ar");
       }
    } else {
       const [ndEn, curEn, gnEn] = await Promise.all([
@@ -214,8 +242,8 @@ async function verifyText({ text, lang }) {
       articles = [...ndEn, ...curEn, ...gnEn];
 
       if (articles.length === 0) {
-        console.log("[HAQQ] Empty — trying GDELT...");
-        articles = await fetchGDELT(searchQuery, "en");
+        console.log("[HAQQ] Empty — trying search engine fallback...");
+        articles = await fetchSearchFallback(searchQuery, "en");
       }
     }
     console.log("[HAQQ] Total articles:", articles.length);
@@ -270,79 +298,208 @@ async function verifyVideo({ text, videoPoster, videoUrl }) {
   if (videoUrl)    return verifyImage({ imageUrl: videoUrl });
   return result("unverified", 0.2, "⚠️ الفيديو يحتاج وصفاً نصياً للتحقق", []);
 }
-// ─── GDELT FETCH ──────────────────────────────────────────
-// ─── GDELT throttle ───────────────────────────────────────
-let _gdeltQueue = Promise.resolve();
 
-async function fetchGDELT(query, lang) {
-  _gdeltQueue = _gdeltQueue.then(() => _fetchGDELTInner(query, lang));
-  return _gdeltQueue;
-}
+// ─── SEARCH ENGINE FALLBACK (Google News RSS primary, DuckDuckGo secondary) ──
+// Replaces GDELT (5s+ rate limiting), Brave (dropped free tier Feb 2026),
+// and SearXNG public instances (their bot/limiter plugin 403s automated
+// format=json requests by design — not fixable by picking a different one).
+// Google News RSS is a public feed meant for machine consumption rather
+// than a scraped HTML search page, so it isn't subject to the same
+// bot-detection wall. It's unofficial/undocumented (Google could change
+// the format without notice) but has been stable for years and is widely
+// used for exactly this purpose. No API key, no card, no signup.
 
-async function _fetchGDELTInner(query, lang) {
-  // ── Read last call time from storage (survives SW restart) ──
-  const stored     = await chrome.storage.session.get("gdeltLastCall");
-  const lastCall   = stored.gdeltLastCall || 0;
-  const now        = Date.now();
-  const wait       = 6500 - (now - lastCall);   // ← 6.5s to be safe
-
-  if (wait > 0) {
-    console.log(`[HAQQ] GDELT throttle — waiting ${Math.round(wait / 1000)}s...`);
-    await new Promise(r => setTimeout(r, wait));
-  }
-
-  // ── Save call time before fetching ───────────────────
-  await chrome.storage.session.set({ gdeltLastCall: Date.now() });
-
-  const safeQuery = query.slice(0, 75).replace(/\s\S*$/, "").trim();
-  console.log(`[HAQQ] GDELT query: "${safeQuery}" (${safeQuery.length} chars)`);
-
+async function fetchGoogleNewsRSS(query, lang) {
+  const safeQuery = query.slice(0, 95).trim();
   if (safeQuery.length < 4) {
-    console.warn("[HAQQ] GDELT query too short — skipping");
+    console.warn("[HAQQ] Google News RSS query too short — skipping");
     return [];
   }
 
-  const url = new URL("https://api.gdeltproject.org/api/v2/doc/doc");
-  url.searchParams.set("query",      lang === "ar" ? safeQuery + " sourcelang:arabic" : safeQuery);
-  url.searchParams.set("mode",       "artlist");
-  url.searchParams.set("format",     "json");
-  url.searchParams.set("maxrecords", "10");
-  url.searchParams.set("sort",       "hybridrel");
+  const url = new URL("https://news.google.com/rss/search");
+  url.searchParams.set("q", safeQuery);
+  if (lang === "ar") {
+    url.searchParams.set("hl", "ar");
+    url.searchParams.set("gl", "EG");
+    url.searchParams.set("ceid", "EG:ar");
+  } else {
+    url.searchParams.set("hl", "en-US");
+    url.searchParams.set("gl", "US");
+    url.searchParams.set("ceid", "US:en");
+  }
+
+  const controller = new AbortController();
+  const timer       = setTimeout(() => controller.abort(), 8000);
 
   try {
-    const res         = await fetch(url);
-    const contentType = res.headers.get("content-type") || "";
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
 
-    if (!res.ok || !contentType.includes("application/json")) {
-      const msg = await res.text();
-      console.warn("[HAQQ] GDELT error:", msg.slice(0, 120));
-
-      if (msg.includes("limit") || msg.includes("5 seconds")) {
-        // Back off — set last call to now so next call waits full 6.5s
-        await chrome.storage.session.set({ gdeltLastCall: Date.now() });
-      }
+    if (!res.ok) {
+      console.warn("[HAQQ] Google News RSS HTTP error:", res.status);
       return [];
     }
 
-    const data = await res.json();
-    if (!data.articles) return [];
-
-    console.log(`[HAQQ] GDELT got ${data.articles.length} articles`);
-
-    return data.articles.map(a => ({
-      title:       a.title  || "",
-      description: "",
-      link:        a.url    || "#",
-      source_id:   a.domain || "",
-      source_name: a.domain || "",
-      _api:        "gdelt"
-    }));
+    const xml     = await res.text();
+    const results = parseGoogleNewsRSS(xml);
+    console.log(`[HAQQ] Google News RSS got ${results.length} results`);
+    return results;
 
   } catch (e) {
-    console.warn("[HAQQ] GDELT fetch error:", e.message);
+    clearTimeout(timer);
+    console.warn("[HAQQ] Google News RSS fetch error:", e.message);
     return [];
   }
 }
+
+// Service workers have no DOMParser, so the RSS/XML is pulled apart with regex.
+function parseGoogleNewsRSS(xml) {
+  const results = [];
+  const itemRe  = /<item>([\s\S]*?)<\/item>/g;
+
+  let match;
+  while ((match = itemRe.exec(xml)) !== null && results.length < 10) {
+    const block = match[1];
+    const title = extractXmlTag(block, "title");
+    const link  = extractXmlTag(block, "link");
+    const desc  = extractXmlTag(block, "description");
+
+    if (!title || !link) continue;
+
+    const srcMatch  = block.match(/<source[^>]*url="([^"]*)"[^>]*>([\s\S]*?)<\/source>/);
+    const srcName   = srcMatch ? decodeXmlEntities(stripCdata(srcMatch[2])).trim() : "";
+    let   srcHost   = "";
+    if (srcMatch) {
+      try { srcHost = new URL(srcMatch[1]).hostname.replace(/^www\./, ""); } catch {}
+    }
+
+    results.push({
+      title:       decodeXmlEntities(stripCdata(title)),
+      description: decodeXmlEntities(stripTags(stripCdata(desc))),
+      link:        decodeXmlEntities(stripCdata(link)),
+      source_id:   srcHost || srcName.toLowerCase(),
+      source_name: srcName,
+      _api:        "googlenews_rss"
+    });
+  }
+  return results;
+}
+
+function extractXmlTag(block, tag) {
+  const m = block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  return m ? m[1] : "";
+}
+
+function stripCdata(str) {
+  return str.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "").trim();
+}
+
+function decodeXmlEntities(str) {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+// ─── DuckDuckGo HTML scrape — no API key, secondary fallback ──
+async function fetchDuckDuckGo(query, lang) {
+  const safeQuery = query.slice(0, 95).trim();
+  if (safeQuery.length < 4) {
+    console.warn("[HAQQ] DDG query too short — skipping");
+    return [];
+  }
+
+  const url = new URL("https://html.duckduckgo.com/html/");
+  url.searchParams.set("q",  safeQuery);
+  url.searchParams.set("kl", lang === "ar" ? "xa-ar" : "us-en");
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+      }
+    });
+
+    if (!res.ok) {
+      console.warn("[HAQQ] DDG HTTP error:", res.status);
+      return [];
+    }
+
+    const html    = await res.text();
+    const results = parseDuckDuckGoHTML(html);
+    console.log(`[HAQQ] DDG got ${results.length} results`);
+    return results;
+
+  } catch (e) {
+    console.warn("[HAQQ] DDG fetch error:", e.message);
+    return [];
+  }
+}
+
+// Service workers have no DOMParser, so results are pulled out with regex.
+function parseDuckDuckGoHTML(html) {
+  const results = [];
+  const blockRe = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>)?/g;
+
+  let match;
+  while ((match = blockRe.exec(html)) !== null && results.length < 10) {
+    const rawHref  = match[1];
+    const rawTitle = stripTags(match[2]);
+    const rawDesc  = match[3] ? stripTags(match[3]) : "";
+    const realUrl  = decodeDuckDuckGoUrl(rawHref);
+
+    if (!rawTitle || !realUrl) continue;
+
+    let hostname = "";
+    try { hostname = new URL(realUrl).hostname.replace(/^www\./, ""); } catch {}
+
+    results.push({
+      title:       rawTitle,
+      description: rawDesc,
+      link:        realUrl,
+      source_id:   hostname,
+      source_name: hostname,
+      _api:        "duckduckgo"
+    });
+  }
+  return results;
+}
+
+// DDG wraps result links: //duckduckgo.com/l/?uddg=<encoded-real-url>&rut=...
+function decodeDuckDuckGoUrl(href) {
+  try {
+    const full = href.startsWith("//") ? "https:" + href : href;
+    const u    = new URL(full);
+    const real = u.searchParams.get("uddg");
+    return real ? decodeURIComponent(real) : full;
+  } catch {
+    return href;
+  }
+}
+
+function stripTags(str) {
+  return str
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .trim();
+}
+
+// ─── Combined entry point: Google News RSS first, DuckDuckGo if empty ──
+async function fetchSearchFallback(query, lang) {
+  let results = await fetchGoogleNewsRSS(query, lang);
+  if (results.length === 0) {
+    console.log("[HAQQ] Google News RSS empty — trying DuckDuckGo...");
+    results = await fetchDuckDuckGo(query, lang);
+  }
+  return results;
+}
+
 // ─── NEWSDATA FETCH ───────────────────────────────────────
 async function fetchNewsData(query, lang) {
   const url = new URL(NEWSDATA_BASE);
@@ -512,10 +669,22 @@ function scoreArticles(originalText, queryKeywords, articles) {
 }
 
 // ─── KEYWORD EXTRACTION ───────────────────────────────────
+// Arabic words run shorter than English ones on average, so a single
+// length cutoff was either too loose for English or too strict for
+// Arabic. A flat `length > 3` was silently dropping real 3-letter
+// Arabic words (e.g. "مصر" = Egypt, "حرب" = war, "نفط" = oil) before
+// they ever reached the stop-word check.
+function isArabicWord(w) {
+  return /[\u0600-\u06FF]/.test(w);
+}
+
 function extractKeywords(text) {
   const tokens = normalise(text)
     .split(/\s+/)
-    .filter(w => w.length > 3 && !STOPS.has(w));
+    .filter(w => {
+      const minLen = isArabicWord(w) ? 2 : 4;
+      return w.length >= minLen && !STOPS_AR.has(w) && !STOPS_EN.has(w);
+    });
 
   const words = [...new Set(tokens)];
   let query   = "";
