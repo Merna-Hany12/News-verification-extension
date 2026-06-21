@@ -91,6 +91,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           return sendResponse({ data: { ok: true } });
         case "HAQQ_CLASSIFY_AI":
           return sendResponse({ data: await classifyWithAI(msg.payload.text) });
+
+        // ─── OCR: extract text from an image URL via the ngrok /ocr endpoint,
+        //     then return the raw text so the content script can pipe it
+        //     through the normal HAQQ_VERIFY_TEXT pipeline unchanged.
+        case "HAQQ_OCR_IMAGE":
+          return sendResponse({ data: await ocrImage(msg.payload) });
+          
+          
+          
         default:
           return sendResponse({ error: "Unknown message type" });
       }
@@ -146,6 +155,53 @@ async function classifyWithAI(text) {
     return null;
   }
 }
+
+// ─── OCR IMAGE ─────────────────────────────────────────────────
+// Sends the image URL to the ngrok /ocr endpoint and returns the
+// extracted text string. The content script then runs that text
+// through the normal HAQQ_VERIFY_TEXT pipeline without any changes.
+async function ocrImage({ imageUrl }) {
+  if (!imageUrl) {
+    console.warn("[HAQQ] ocrImage — no imageUrl provided");
+    return { text: "" };
+  }
+
+  console.log("[HAQQ] OCR request for:", imageUrl.slice(0, 80));
+
+  try {
+    const res = await fetch(`${NGROK_URL}/ocr`, {
+      method:  "POST",
+      headers: {
+        "Content-Type":               "application/json",
+        "ngrok-skip-browser-warning": "true"
+      },
+      body: JSON.stringify({ image_url: imageUrl })
+    });
+
+    console.log("[HAQQ] OCR status:", res.status);
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn("[HAQQ] OCR HTTP error:", err.slice(0, 200));
+      return { text: "" };
+    }
+
+    const data = await res.json();
+    console.log("[HAQQ] OCR response:", JSON.stringify(data).slice(0, 200));
+
+    // Accept either { text: "..." } or { extracted_text: "..." } from the server
+    const extracted = data.text || data.extracted_text || "";
+    return { text: extracted };
+
+  } catch (e) {
+    console.warn("[HAQQ] OCR unreachable:", e.message);
+    return { text: "" };
+  }
+}
+
+
+
+
 
 async function verifyText({ text, lang }) {
   if (!text || text.trim().length < 20)
