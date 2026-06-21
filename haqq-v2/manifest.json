@@ -20,7 +20,9 @@
     "https://*.ngrok-free.app/*",
     "https://api.gdeltproject.org/*",
     "https://api.currentsapi.services/*",
-    "https://gnews.io/*"
+    "https://gnews.io/*",
+    "https://news.google.com/*",
+    "https://html.duckduckgo.com/*"
   ],
 
   "background": {

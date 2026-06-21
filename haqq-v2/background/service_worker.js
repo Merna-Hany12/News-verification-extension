@@ -52,12 +52,14 @@ const STOPS_AR = new Set([
   "هناك","هنا","أيضا","ايضا","لذلك","لذا","عندما","كذلك",
   "سوف","لقد","إلا","سوى","معه","معها","منه","منها",
   "إليه","إليها","عليه","عليها","فيه","فيها","لهذا","لهذه",
-  // newswire reporting verbs/phrasing — present in nearly every
-  // article regardless of topic, so they dilute search specificity
+  // newswire reporting verbs/phrasing
   "قال","قالت","وقال","وقالت","أضاف","أضافت","وأضاف","وأضافت",
   "أعلن","أعلنت","وأعلن","وأعلنت","ذكر","ذكرت","وذكر","وذكرت",
   "أكد","أكدت","وأكد","وأكدت","أشار","أشارت","وأشار","وأشارت",
-  "بحسب","وفقا","وفقاً","حسب","تابع","تابعت","أوضح","أوضحت"
+  "بحسب","وفقا","وفقاً","حسب","تابع","تابعت","أوضح","أوضحت",
+  // breaking-news flag words — attached to nearly any story,
+  // add no search specificity
+  "عاجل","خبر عاجل","عاجل الآن"
 ]);
 
 const STOPS_EN = new Set([
@@ -70,7 +72,9 @@ const STOPS_EN = new Set([
   "including","their","there","here","will","would","could","should",
   "they","them","your","just","like","make","made","being","still",
   "only","very","much","many","each","both","other","another",
-  "first","last","year","years","time","news"
+  "first","last","year","years","time","news",
+  // breaking-news flag words
+  "breaking","breakingnews"
 ]);
 
 // ─── ROUTER ───────────────────────────────────────────────
@@ -246,11 +250,11 @@ async function verifyText({ text, lang }) {
   if (kwCount < 2)
     return result("unverified", 0.2, "الكلمات المفتاحية غير كافية للبحث", []);
 
-  const searchQuery = keywords.length <= 85
-    ? keywords
-    : keywords.slice(0, 85).replace(/\s\S*$/, "").trim();
+  const apiQuery    = fitKeywordsToLimit(keywords, API_QUERY_LIMIT);
+  const searchQuery = fitKeywordsToLimit(keywords, SEARCH_QUERY_LIMIT);
 
-  console.log("[HAQQ] Search query:", searchQuery);
+  console.log("[HAQQ] API query:", apiQuery);
+  console.log("[HAQQ] Search-engine query:", searchQuery);
 
   // ── 4. CACHE ──────────────────────────────────────────
   const cKey = "text::" + normalise(text).slice(0, 100);
@@ -265,9 +269,9 @@ async function verifyText({ text, lang }) {
     let articles = [];
     if (lang === "ar") {
       const [ndAr, curAr, gnAr] = await Promise.all([
-        fetchNewsData(searchQuery, "ar"),
-        fetchCurrents(searchQuery, "ar"),
-        fetchGNews(searchQuery, "ar"),
+        fetchNewsData(apiQuery, "ar"),
+        fetchCurrents(apiQuery, "ar"),
+        fetchGNews(apiQuery, "ar"),
       ]);
 
       console.group("[HAQQ] Articles (ar)");
@@ -280,6 +284,7 @@ async function verifyText({ text, lang }) {
 
       if (articles.length === 0) {
         console.log("[HAQQ] Still empty — trying search engine fallback...");
+
         articles = await fetchSearchFallback(searchQuery, "ar");
       }
    } else {
@@ -366,7 +371,7 @@ async function verifyVideo({ text, videoPoster, videoUrl }) {
 // used for exactly this purpose. No API key, no card, no signup.
 
 async function fetchGoogleNewsRSS(query, lang) {
-  const safeQuery = query.slice(0, 95).trim();
+  const safeQuery = query.slice(0, 200).trim();
   if (safeQuery.length < 4) {
     console.warn("[HAQQ] Google News RSS query too short — skipping");
     return [];
@@ -462,7 +467,7 @@ function decodeXmlEntities(str) {
 
 // ─── DuckDuckGo HTML scrape — no API key, secondary fallback ──
 async function fetchDuckDuckGo(query, lang) {
-  const safeQuery = query.slice(0, 95).trim();
+  const safeQuery = query.slice(0, 200).trim();
   if (safeQuery.length < 4) {
     console.warn("[HAQQ] DDG query too short — skipping");
     return [];
@@ -743,16 +748,22 @@ function extractKeywords(text) {
     });
 
   const words = [...new Set(tokens)];
-  let query   = "";
+  const query = words.join(" ");
 
-  for (const word of words) {
-    const next = query ? `${query} ${word}` : word;
-    if (next.length > 95) break;   // ← hard stop at 85 chars
-    query = next;
-  }
-
-  console.log("[HAQQ] Keywords built:", query, "| length:", query.length);
+  console.log("[HAQQ] Keywords built (full):", query, "| length:", query.length);
   return query || null;
+}
+
+// ─── Per-destination keyword fitting ──────────────────────
+// News APIs (NewsData/Currents/GNews) want short, precise queries.
+// RSS/search-engine fallback handles longer queries fine — give it
+// more room instead of reusing the API-fitted string.
+const API_QUERY_LIMIT    = 95;  // NewsData / Currents / GNews
+const SEARCH_QUERY_LIMIT = 200; // Google News RSS / DuckDuckGo
+
+function fitKeywordsToLimit(keywords, limit) {
+  if (keywords.length <= limit) return keywords;
+  return keywords.slice(0, limit).replace(/\s\S*$/, "").trim();
 }
 
 function keywordsFromUrl(url) {
