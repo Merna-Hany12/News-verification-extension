@@ -1,0 +1,1 @@
+# HAQQ Backend Models package

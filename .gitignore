@@ -1,11 +1,12 @@
 # API Keys
-haqq-v2/background/config.js
+extension/background/config.js
 
 # Python
-APIs/venv/
-APIs/__pycache__/
-APIs/*.pyc
-APIs/.env
+backend/venv/
+backend/__pycache__/
+backend/**/*.pyc
+backend/.env
+.venv/
 
 # OS
 .DS_Store
