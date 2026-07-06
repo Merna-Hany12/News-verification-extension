@@ -1,5 +1,13 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / ".env"
 
+loaded = load_dotenv(ENV_FILE)
+
+print("Loading:", ENV_FILE)
+print("Loaded:", loaded)
 NEWSDATA_KEY = os.environ.get("NEWSDATA_API_KEY", "")
 CURRENTS_KEY = os.environ.get("CURRENTS_API_KEY", "")
 GNEWS_KEY    = os.environ.get("GNEWS_API_KEY",    "")
