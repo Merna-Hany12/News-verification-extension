@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>HAQQ — حقّق</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; width: 320px; padding: 16px; background: #0f0f0f; color: #eee; font-size: 14px; }
+  h1   { font-size: 18px; color: #f5c518; margin-bottom: 4px; }
+  .sub { color: #888; font-size: 12px; margin-bottom: 16px; }
+  label { display: block; margin-bottom: 4px; font-size: 12px; color: #aaa; }
+  input { width: 100%; padding: 8px 10px; background: #1a1a1a; color: #eee; border: 1px solid #333; border-radius: 6px; font-size: 13px; margin-bottom: 6px; }
+  input:focus { outline: none; border-color: #f5c518; }
+  .btn       { width: 100%; padding: 9px; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; margin-bottom: 6px; }
+  .btn-save  { background: #f5c518; color: #000; }
+  .btn-save:hover  { background: #e6b800; }
+  .btn-clear { background: #2a1a1a; color: #f44336; border: 1px solid #3a2a2a; font-size: 12px; padding: 6px; }
+  .btn-reset { background: #1a1a1a; color: #777; border: 1px solid #333; font-size: 12px; padding: 6px; margin-top: 4px; }
+  .msg  { font-size: 12px; text-align: center; min-height: 16px; margin: 4px 0 8px; padding: 4px 8px; border-radius: 4px; }
+  .ok   { color: #4caf50; background: #0a1f0a; }
+  .err  { color: #f44336; background: #1f0a0a; }
+  .info { color: #90caf9; background: #0a0f1f; }
+  hr    { border-color: #222; margin: 12px 0; }
+  .stats { font-size: 12px; color: #666; line-height: 2; }
+  .stats b { color: #eee; }
+  .hint { font-size: 11px; color: #444; margin-top: 12px; line-height: 1.7; }
+  .hint a { color: #f5c518; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<h1>🔍 HAQQ — حقّق</h1>
+<p class="sub">كاشف المحتوى المضلل على فيسبوك</p>
+
+<label>NewsData.io API Key</label>
+<input type="text" id="key" placeholder="pub_xxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+
+<!-- NO onclick attributes — all events wired in popup.js -->
+<button class="btn btn-save" id="saveBtn">💾 حفظ المفتاح</button>
+<div class="msg" id="msg"></div>
+<button class="btn btn-clear" id="clearBtn">🗑 حذف المفتاح</button>
+
+<hr>
+
+<div class="stats">
+  <div>إجمالي: <b id="s-total">0</b></div>
+  <div>✅ موثوق: <b id="s-fact">0</b></div>
+  <div>⚠️ غير مؤكد: <b id="s-unver">0</b></div>
+  <div>❌ مضلل: <b id="s-fake">0</b></div>
+  <div>🤖 AI: <b id="s-ai">0</b></div>
+</div>
+<button class="btn btn-reset" id="resetBtn">↺ إعادة تعيين الإحصائيات</button>
+
+<p class="hint">
+  سجّل مجاناً على
+  <a href="https://newsdata.io/register" target="_blank">newsdata.io</a>
+  — المفتاح يبدأ بـ <code style="color:#f5c518">pub_</code> • 200 طلب / يوم
+</p>
+
+<!-- External script only — no inline JS allowed in MV3 -->
+<script src="popup.js"></script>
+</body>
+</html>
