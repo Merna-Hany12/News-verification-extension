@@ -33,18 +33,29 @@ TRUSTED: set[str] = {
     "washingtonpost", "wsj", "bloomberg", "time", "newsweek",
     "nbcnews", "cbsnews", "abcnews", "usatoday", "latimes",
     "independent", "telegraph", "ft", "middleeasteye",
-    # Scientific / encyclopedic (relevant for historical_sci class)
+    "npr", "pbs", "axios", "politico", "propublica",
+    "economist", "forbes", "cnbc", "marketwatch", "businessinsider",
+
+    # Fact-checking
+    "snopes", "politifact", "factcheck", "fullfact",
+
+    # Scientific / encyclopedic / health
     "wikipedia", "britannica", "nature", "sciencedirect", "pubmed",
     "ncbi", "nih", "who", "nasa", "arxiv", "scholar",
+    "thelancet", "nejm", "cdc", "esa", "sciencemag", "aaas", "jpl",
+
     # Arabic
     "الجزيرة", "رويترز", "العربية", "alarabiya", "france24arabic",
     "aawsat", "asharqalawsat", "alhurra",
+    "skynewsarabia", "bbcarabic", "cnnarabic", "independentarabia",
+    "alain", "emaratalyoum", "alsharq", "annahar",
+
     # Egyptian
     "ahram", "alahram", "youm7", "masrawy", "elwatannews",
     "almasryalyoum", "shorouk", "elshorouk", "vetogate",
     "filbalad", "mobtada", "dotmsr", "elbashayer", "cairo24",
+    "sis", "egypttoday", "dailynewsegypt", "ahramonline",
 }
-
 # Labels for the three-class zero-shot classifier
 CLASSIFY_LABELS = [
     # class 0 — news

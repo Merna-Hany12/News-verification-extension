@@ -68,10 +68,35 @@ def _fit(keywords: str, limit: int) -> str:
     return re.sub(r"\s\S*$", "", truncated).strip()
 
 
+# ─── TRUSTED-SOURCE MATCHING ─────────────────────────────────────────────────
+# Precompile one word-boundary pattern per TRUSTED entry, once, at import time.
+# Word-boundary matching prevents false positives like "time" matching inside
+# "The Economic Times" or "ap" matching inside "apparel" — plain substring
+# matching (`t in sid`) was doing exactly that.
+_TRUSTED_PATTERNS: list[tuple[str, re.Pattern]] = [
+    (t, re.compile(rf"\b{re.escape(t)}\b", re.UNICODE))
+    for t in TRUSTED
+]
+
+
 def _is_trusted(source_id: str, source_name: str) -> bool:
     sid  = source_id.lower()
     snam = source_name.lower()
-    return any(t in sid or t in snam for t in TRUSTED)
+    return any(p.search(sid) or p.search(snam) for _, p in _TRUSTED_PATTERNS)
+
+
+def _trusted_label(source_id: str, source_name: str) -> Optional[str]:
+    """
+    Same check as _is_trusted, but returns *which* TRUSTED entry matched
+    (or None). Useful for logging/debugging false positives/negatives
+    instead of just a bool.
+    """
+    sid  = source_id.lower()
+    snam = source_name.lower()
+    for term, pattern in _TRUSTED_PATTERNS:
+        if pattern.search(sid) or pattern.search(snam):
+            return term
+    return None
 
 
 def _html_decode(s: str) -> str:
@@ -89,7 +114,6 @@ def _xml_tag(block: str, tag: str) -> str:
 
 def _strip_cdata(s: str) -> str:
     return re.sub(r"^<!\[CDATA\[", "", s).replace("]]>", "").strip()
-
 
 def _parse_rss(xml: str) -> list[dict]:
     results: list[dict] = []
@@ -111,8 +135,11 @@ def _parse_rss(xml: str) -> list[dict]:
             except Exception:
                 pass
 
-        raw_link  = _html_decode(_strip_cdata(link))
-        real_link = src_url if src_url else raw_link
+        # `link` is the actual per-article URL (via Google News redirect).
+        # `src_url` from <source url="..."> is just the publisher's
+        # homepage — never use it as the clickable link, only for
+        # deriving the source_id/host below.
+        real_link = _html_decode(_strip_cdata(link))
 
         results.append({
             "title":       _html_decode(_strip_cdata(title)),
