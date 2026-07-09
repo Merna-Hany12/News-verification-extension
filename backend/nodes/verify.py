@@ -6,54 +6,69 @@ from backend.core.config import (
     BODY_CHARS_PER_ARTICLE,
 )
 from backend.core.state import HAQQState, _make_result
-from backend.core.text_processing import _normalise, _is_trusted
+from backend.core.text_processing import _normalise, _is_trusted, _trusted_label
+
+
+def _rank_key(a: dict, kws: list[str]) -> tuple[bool, int]:
+    """
+    Shared ranking key: trusted sources first, then by keyword overlap.
+    Used both to pick what the LLM sees and what ends up in `sources`.
+    """
+    blob    = _normalise(f"{a.get('title','')} {a.get('description','')} {a.get('body','')}")
+    overlap = sum(1 for k in kws if k in blob)
+    trusted = _is_trusted(a.get("source_id", ""), a.get("source_name", ""))
+    return (trusted, overlap)
+
+
+def _log_trusted(articles: list[dict], tag: str) -> None:
+    trusted_found = []
+    for a in articles:
+        label = _trusted_label(a.get("source_id", ""), a.get("source_name", ""))
+        if label:
+            name = a.get("source_name") or a.get("source_id") or "unknown"
+            trusted_found.append(f"{name} (matched: '{label}')")
+    if trusted_found:
+        print(f"[HAQQ graph] {tag} trusted sources ({len(trusted_found)}): {', '.join(trusted_found)}")
+    else:
+        print(f"[HAQQ graph] {tag} trusted sources: none")
 
 
 async def llm_verify_node(state: HAQQState) -> HAQQState:
-    """
-    Sends claim + enriched article content to Groq/Llama.
-
-    Content priority per article (best available wins):
-      1. article["body"]        ← real fetched body text (fetch_bodies_node)
-      2. article["description"] ← API/RSS snippet
-      3. article["title"]       ← last resort
-
-    The system prompt is adjusted for content_type:
-      • news              → focus on event confirmation, recency
-      • historical_sci    → focus on factual accuracy, scientific consensus
-    """
     claim        = state["text"]
     articles     = state["articles"]
     lang         = state.get("lang", "ar")
     content_type = state.get("content_type", "news")
     keywords     = (state.get("keywords") or "").split()
+    kws          = [_normalise(k) for k in keywords if len(k) > 2]
 
-    def _overlap(a: dict) -> int:
-        blob = _normalise(f"{a.get('title','')} {a.get('description','')} {a.get('body','')}")
-        return sum(1 for k in keywords if k in blob)
+    _log_trusted(articles, "llm_verify_node —")
 
-    ranked = sorted(articles, key=_overlap, reverse=True)
+    ranked = sorted(articles, key=lambda a: _rank_key(a, kws), reverse=True)
 
-    # ── Relevance gate ────────────────────────────────────────────────────────
-    if ranked and _overlap(ranked[0]) == 0:
+    top_overlap = _rank_key(ranked[0], kws)[1] if ranked else 0
+    if ranked and top_overlap == 0:
         print("[HAQQ graph] LLM skipped — no article overlaps with keywords")
         return {
             **state,
-            "llm_verdict":   "UNCONFIRMED",
-            "llm_reasoning": "لا تتناول المصادر المتاحة موضوع الادعاء",
+            "llm_verdict":        "UNCONFIRMED",
+            "llm_reasoning":      "لا تتناول المصادر المتاحة موضوع الادعاء",
+            "llm_topic_mismatch": True,
         }
 
-    # ── Build snippets ────────────────────────────────────────────────────────
     snippets = []
     for i, a in enumerate(ranked[:6], 1):
-        title   = (a.get("title") or "").strip()
-        # Prefer real body, fall back to API snippet, then title
-        content = (a.get("body") or a.get("description") or "")[:BODY_CHARS_PER_ARTICLE].strip()
-        src     = a.get("source_name") or a.get("source_id") or "مصدر غير معروف"
-        url     = a.get("link", "")
+        title    = (a.get("title") or "").strip()
+        content  = (a.get("body") or a.get("description") or "")[:BODY_CHARS_PER_ARTICLE].strip()
+        src      = a.get("source_name") or a.get("source_id") or "مصدر غير معروف"
+        url      = a.get("link", "")
         has_body = bool(a.get("body"))
+        trusted  = _is_trusted(a.get("source_id", ""), a.get("source_name", ""))
 
-        snippet_lines = [f"[{i}] ({src}) {'[full body]' if has_body else '[snippet]'}"]
+        tag_bits = ["[full body]" if has_body else "[snippet]"]
+        if trusted:
+            tag_bits.append("[trusted]")
+
+        snippet_lines = [f"[{i}] ({src}) {' '.join(tag_bits)}"]
         if url:
             snippet_lines.append(f"URL: {url}")
         snippet_lines.append(f"العنوان: {title}")
@@ -63,37 +78,49 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
 
     snippets_text = "\n\n".join(snippets)
 
-    # ── System prompt — tuned per content type ────────────────────────────────
     if content_type == "historical_scientific":
         system_prompt = (
             "أنت محقق حقائق علمية وتاريخية. مهمتك تقييم ما إذا كانت المصادر المتاحة "
             "تؤكد الادعاء العلمي أو التاريخي أم لا.\n\n"
-            "أجب بهذا الشكل الحرفي فقط — سطران:\n"
+            "أجب بهذا الشكل الحرفي فقط — ثلاثة أسطر، بدون أي نص إضافي:\n"
             "السطر الأول: كلمة واحدة: CONFIRMED أو UNCONFIRMED أو CONTRADICTED\n"
-            "السطر الثاني: جملة عربية واحدة تصف ما تقوله المصادر عن هذا الموضوع.\n\n"
+            "السطر الثاني: جملة عربية واحدة قصيرة تصف ما تقوله المصادر عن هذا الموضوع.\n"
+            "السطر الثالث: كلمة واحدة فقط: TOPIC_MATCH أو TOPIC_MISMATCH.\n\n"
             "تعريفات:\n"
-            "- CONFIRMED: مصدران أو أكثر موثوقان (ويكيبيديا، بريتانيكا، NIH، NASA، إلخ) "
-            "يؤكدان المعلومة بتفاصيل متطابقة.\n"
+            "- CONFIRMED: مصدران أو أكثر موثوقان يؤكدان المعلومة بتفاصيل متطابقة.\n"
             "- CONTRADICTED: مصدر موثوق ينفي المعلومة صراحةً أو يصححها.\n"
-            "- UNCONFIRMED: أي حالة أخرى.\n\n"
-            "مهم: السطر الثاني يصف ما تقوله المصادر فعلاً، ليس سبب حكمك."
+            "- UNCONFIRMED: أي حالة أخرى.\n"
+            "- TOPIC_MISMATCH: المصادر عن نفس المجال العام لكنها لا تتناول تفاصيل الادعاء تحديداً "
+            "(حدث مختلف، شخص مختلف، واقعة مختلفة، أو مجرد توترات عامة وليس الحدث المحدد بالادعاء).\n\n"
+            "مهم: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً، مهما كانت الإجابة."
         )
     else:
         system_prompt = (
             "أنت محقق أخبار محترف. مهمتك تقييم ما إذا كانت المقالات تؤكد الادعاء أم لا.\n\n"
-            "أجب بهذا الشكل الحرفي فقط — سطران:\n"
+            "أجب بهذا الشكل الحرفي فقط — ثلاثة أسطر، بدون أي نص إضافي:\n"
             "السطر الأول: كلمة واحدة: CONFIRMED أو UNCONFIRMED أو CONTRADICTED\n"
-            "السطر الثاني: جملة عربية واحدة تصف ما تقوله المصادر عن هذا الموضوع.\n\n"
+            "السطر الثاني: جملة عربية واحدة قصيرة تصف ما تقوله المصادر عن هذا الموضوع.\n"
+            "السطر الثالث: كلمة واحدة فقط: TOPIC_MATCH أو TOPIC_MISMATCH.\n\n"
             "تعريفات:\n"
             "- CONFIRMED: مقالتان أو أكثر تتناول نفس الحدث بتفاصيل متطابقة.\n"
             "- CONTRADICTED: مصدر موثوق ينفي الادعاء صراحةً.\n"
-            "- UNCONFIRMED: أي حالة أخرى.\n\n"
-            "مهم جداً: السطر الثاني يصف ما تقوله المصادر فعلاً، وليس سبب حكمك."
+            "- UNCONFIRMED: أي حالة أخرى.\n"
+            "- TOPIC_MISMATCH: المصادر عن نفس المجال العام (مثلاً التوترات بين إيران وإسرائيل) "
+            "لكنها لا تتناول التفاصيل المحددة في الادعاء (حدث مختلف، تصريح مختلف، واقعة مختلفة).\n\n"
+            "مهم جداً: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً، مهما كانت الإجابة."
         )
 
     user_prompt = (
         f"الادعاء:\n{claim[:600]}\n\n"
         f"المصادر:\n{snippets_text}"
+    )
+
+    # Backup phrase list — used ONLY as a secondary safety net on top of the
+    # structured TOPIC_MATCH/TOPIC_MISMATCH signal, in case the model's
+    # third line gets truncated or it drifts from the exact format.
+    _NEGATION_PATTERNS = (
+        "لا تتحدث عن", "لا تتناول", "لا تذكر", "لا تغطي",
+        "غير ذات صلة", "لا علاقة", "بل تتناول", "لا يوجد",
     )
 
     try:
@@ -104,13 +131,14 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_prompt},
             ],
-            max_tokens=200,
+            max_tokens=300,   # ← bumped from 200 — was likely truncating line 3
             temperature=0.1,
         )
         raw       = resp.choices[0].message.content.strip()
         lines     = [l.strip() for l in raw.splitlines() if l.strip()]
         llm_label = lines[0].upper() if lines else "UNCONFIRMED"
         summary   = lines[1] if len(lines) > 1 else ""
+        topic_raw = lines[2].upper() if len(lines) > 2 else ""   # ← no permissive default
 
         for tag in ("CONFIRMED", "CONTRADICTED", "UNCONFIRMED"):
             if tag in llm_label:
@@ -119,13 +147,50 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
         else:
             llm_label = "UNCONFIRMED"
 
-        print(f"[HAQQ graph] LLM → {llm_label} | {summary[:80]}")
-        return {**state, "llm_verdict": llm_label, "llm_reasoning": summary}
+        topic_mismatch_explicit = "TOPIC_MISMATCH" in topic_raw
+        topic_match_explicit    = "TOPIC_MATCH" in topic_raw and not topic_mismatch_explicit
+
+        # Secondary safety net: if the model didn't clearly say TOPIC_MATCH
+        # (either it said TOPIC_MISMATCH, or the line was missing/malformed),
+        # fall back to scanning the summary text for negation phrasing.
+        text_signals_mismatch = any(p in (summary or "") for p in _NEGATION_PATTERNS)
+
+        if topic_mismatch_explicit:
+            topic_mismatch = True
+        elif topic_match_explicit:
+            topic_mismatch = False
+        else:
+            # Line 3 missing/unparseable — don't default to "trusted", check
+            # the text, and if that's inconclusive too, be conservative.
+            topic_mismatch = True if text_signals_mismatch else True
+            # (kept explicit rather than collapsed, so the conservative
+            # intent is obvious: unclear signal → treat as mismatch)
+
+        if topic_mismatch_explicit or text_signals_mismatch:
+            topic_mismatch = True
+
+        if llm_label == "CONFIRMED" and topic_mismatch:
+            print("[HAQQ graph] LLM said CONFIRMED but topic signal says mismatch — downgrading to UNCONFIRMED")
+            llm_label = "UNCONFIRMED"
+
+        print(f"[HAQQ graph] LLM → {llm_label} | topic_match={not topic_mismatch} "
+              f"(explicit_line3='{topic_raw}', text_backup_fired={text_signals_mismatch}) | {summary[:80]}")
+
+        return {
+            **state,
+            "llm_verdict":        llm_label,
+            "llm_reasoning":      summary,
+            "llm_topic_mismatch": topic_mismatch,
+        }
 
     except Exception as exc:
         print(f"[HAQQ graph] LLM error: {exc}")
-        return {**state, "llm_verdict": "UNCONFIRMED", "llm_reasoning": ""}
-
+        return {
+            **state,
+            "llm_verdict":        "UNCONFIRMED",
+            "llm_reasoning":      "",
+            "llm_topic_mismatch": True,
+        }
 
 def score_node(state: HAQQState) -> HAQQState:
     """
@@ -134,9 +199,13 @@ def score_node(state: HAQQState) -> HAQQState:
     LLM=CONFIRMED  + ≥1 trusted → fact   (high confidence)
     LLM=CONFIRMED  + 0 trusted  → fact   (medium confidence)
     LLM=CONTRADICTED            → fake
-    LLM=UNCONFIRMED + ≥2 trusted → fact  (trusted sources agree even if LLM unsure)
+    LLM=UNCONFIRMED + ≥2 trusted + topic match → fact
     LLM=UNCONFIRMED + ≥3 untrusted → unverified (widespread but unconfirmed)
     LLM=UNCONFIRMED otherwise   → unverified
+
+    Note: llm_verify_node already downgrades CONFIRMED+TOPIC_MISMATCH to
+    UNCONFIRMED before this node runs, so the CONFIRMED branch below can
+    trust llm_verdict at face value.
     """
     articles    = state["articles"]
     keywords    = (state.get("keywords") or "").split()
@@ -148,10 +217,9 @@ def score_node(state: HAQQState) -> HAQQState:
     trusted_matches   = 0
     untrusted_matches = 0
     total_overlap     = 0
-    sources: list[dict] = []
+    candidate_sources: list[dict] = []
 
     for a in articles:
-        # Include body in overlap calc since fetch_bodies_node enriched it
         blob    = _normalise(
             f"{a.get('title','')} {a.get('description','')} {a.get('body','')}"
         )
@@ -159,17 +227,38 @@ def score_node(state: HAQQState) -> HAQQState:
         trusted = _is_trusted(a.get("source_id", ""), a.get("source_name", ""))
         total_overlap += overlap
 
-        if overlap >= 1 and len(sources) < 5:
+        if trusted:
+            print(f"[HAQQ graph] score_node — trusted candidate "
+                  f"'{a.get('title','')[:40]}' overlap={overlap}")
+
+        # Trusted sources get a lower bar (overlap >= 0, i.e. just "mentioned
+        # by name" is enough) since we already know the outlet is reliable —
+        # untrusted sources still need at least 1 keyword match to prove
+        # relevance to the claim.
+        min_overlap_for_inclusion = 0 if trusted else 1
+
+        if overlap >= min_overlap_for_inclusion:
             url   = a.get("link", "#")
             title = a.get("title", "") or a.get("source_name", "") or url
             if url and url != "#":
-                sources.append({"url": url, "title": title})
+                candidate_sources.append({
+                    "url": url,
+                    "title": title,
+                    "trusted": trusted,
+                    "overlap": overlap,
+                })
 
         if overlap >= 2:
             if trusted:
                 trusted_matches += 1
             else:
                 untrusted_matches += 1
+
+    candidate_sources.sort(key=lambda s: (s["trusted"], s["overlap"]), reverse=True)
+    sources = candidate_sources[:5]
+
+    print(f"[HAQQ graph] score_node — final sources order: "
+          f"{[(s['title'][:30], s['trusted'], s['overlap']) for s in sources]}")
 
     ratio   = min(total_overlap / (len(kws) * len(articles) + 0.001), 1.0)
     summary = reasoning
@@ -197,9 +286,11 @@ def score_node(state: HAQQState) -> HAQQState:
             sources,
         )}
 
-    # UNCONFIRMED — only promote to fact if ≥2 trusted and LLM doesn't signal off-topic
-    off_topic = ("لا تتناول", "لا تذكر", "لا تغطي", "غير ذات صلة", "لا علاقة")
-    llm_off_topic = any(s in (summary or "") for s in off_topic)
+    # UNCONFIRMED — only promote to fact if ≥2 trusted AND the LLM itself
+    # confirmed the sources are actually about this specific claim (not just
+    # the same general topic). This replaces the old brittle phrase-matching
+    # against `summary` — the LLM now tells us explicitly via line 3.
+    llm_off_topic = state.get("llm_topic_mismatch", False)
 
     if not llm_off_topic and trusted_matches >= 2:
         return {**state, **_make_result(
