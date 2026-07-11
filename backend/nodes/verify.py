@@ -4,6 +4,7 @@ from backend.core.config import (
     GROQ_API_KEY,
     GROQ_MODEL,
     BODY_CHARS_PER_ARTICLE,
+    MEDICAL_TRUSTED,
 )
 from backend.core.state import HAQQState, _make_result
 from backend.core.text_processing import _normalise, _is_trusted, _trusted_label
@@ -78,7 +79,33 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
 
     snippets_text = "\n\n".join(snippets)
 
-    if content_type == "historical_scientific":
+    if content_type == "medical":
+        system_prompt = (
+            "أنت محقق معلومات طبية متخصص. مهمتك الحكم على صحة الادعاء الطبي علمياً.\n\n"
+            "قاعدة حاسمة: أنت تقيّم هل الادعاء الطبي صحيح علمياً أم لا — وليس هل المصادر تتحدث عنه.\n"
+            "مثال: إذا كان الادعاء 'شرب المبيض يعالج كورونا' والمصادر تقول 'شرب المبيض خطير ولا يعالج كورونا' "
+            "→ الحكم هو CONTRADICTED لأن المصادر تنفي الادعاء الطبي.\n"
+            "مثال: إذا كان الادعاء 'التدخين يسبب السرطان' والمصادر تؤكد ذلك علمياً "
+            "→ الحكم هو CONFIRMED.\n\n"
+            "أجب بهذا الشكل الحرفي فقط — ثلاثة أسطر، بدون أي نص إضافي:\n"
+            "السطر الأول: كلمة واحدة: CONFIRMED أو UNCONFIRMED أو CONTRADICTED\n"
+            "السطر الثاني: جملة عربية واحدة قصيرة تصف ما تقوله المصادر الطبية.\n"
+            "السطر الثالث: كلمة واحدة فقط: TOPIC_MATCH أو TOPIC_MISMATCH.\n\n"
+            "تعريفات:\n"
+            "- CONFIRMED: الادعاء الطبي صحيح علمياً — مصادر طبية موثوقة تؤكد أن العلاج فعال أو أن السبب حقيقي.\n"
+            "- CONTRADICTED: الادعاء الطبي خاطئ — المصادر تنفي فعالية العلاج، تصفه بأنه خطير، أو تكذّب المعلومة الطبية.\n"
+            "- UNCONFIRMED: لا توجد أدلة كافية للتأكيد أو النفي، أو النتائج متضاربة.\n"
+            "- TOPIC_MISMATCH: المصادر عن موضوع طبي مختلف عن الادعاء.\n\n"
+            "تنبيه مهم:\n"
+            "- إذا قالت المصادر أن علاجاً ما 'خطير' أو 'لا دليل على فعاليته' أو 'خرافة' → هذا CONTRADICTED\n"
+            "- إذا كان الادعاء عن علاج مزيف (مثل شرب مبيض، زيوت تشفي السرطان) والمصادر تحذر منه → CONTRADICTED\n"
+            "- لا تخلط بين 'المصادر تتحدث عن نفس الموضوع' و 'المصادر تؤكد صحة الادعاء'\n\n"
+            "مستوى الدليل (من الأقوى للأضعف):\n"
+            "- المراجعات المنهجية والتحليلات التلوية > التجارب العشوائية > الدراسات الرصدية > آراء الخبراء\n"
+            "- التجارب الشخصية والإشاعات ليست دليلاً طبياً\n\n"
+            "مهم: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً."
+        )
+    elif content_type == "historical_scientific":
         system_prompt = (
             "أنت محقق حقائق علمية وتاريخية. مهمتك تقييم ما إذا كانت المصادر المتاحة "
             "تؤكد الادعاء العلمي أو التاريخي أم لا.\n\n"
@@ -207,10 +234,11 @@ def score_node(state: HAQQState) -> HAQQState:
     UNCONFIRMED before this node runs, so the CONFIRMED branch below can
     trust llm_verdict at face value.
     """
-    articles    = state["articles"]
-    keywords    = (state.get("keywords") or "").split()
-    llm_verdict = state.get("llm_verdict", "UNCONFIRMED")
-    reasoning   = state.get("llm_reasoning", "")
+    articles     = state["articles"]
+    keywords     = (state.get("keywords") or "").split()
+    llm_verdict  = state.get("llm_verdict", "UNCONFIRMED")
+    reasoning    = state.get("llm_reasoning", "")
+    content_type = state.get("content_type", "news")
 
     kws = [_normalise(k) for k in keywords if len(k) > 2]
 
@@ -224,7 +252,16 @@ def score_node(state: HAQQState) -> HAQQState:
             f"{a.get('title','')} {a.get('description','')} {a.get('body','')}"
         )
         overlap = sum(1 for k in kws if k in blob)
-        trusted = _is_trusted(a.get("source_id", ""), a.get("source_name", ""))
+        # For medical content, also check against MEDICAL_TRUSTED sources
+        if content_type == "medical":
+            sid = a.get("source_id", "").lower()
+            snam = a.get("source_name", "").lower()
+            trusted = (
+                _is_trusted(sid, snam)
+                or any(mt in sid or mt in snam for mt in MEDICAL_TRUSTED)
+            )
+        else:
+            trusted = _is_trusted(a.get("source_id", ""), a.get("source_name", ""))
         total_overlap += overlap
 
         if trusted:

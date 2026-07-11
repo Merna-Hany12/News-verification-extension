@@ -17,7 +17,7 @@ def _after_classify(state: HAQQState) -> str:
     content_type = state.get("content_type", "news")
     if content_type == "non_news":
         return "non_news_exit"
-    # Both "news" and "historical_scientific" go to keyword extraction
+    # "news", "historical_scientific", and "medical" all go to keyword extraction
     return "extract_keywords"
 
 
@@ -75,7 +75,7 @@ def build_graph() -> Any:
     g.add_edge("score",      END)
 
     compiled = g.compile()
-    print("[HAQQ graph] Graph compiled ✅  (v2 — 3-class + DDG + body fetch)")
+    print("[HAQQ graph] Graph compiled ✅  (v3 — 4-class + DDG + PubMed + body fetch)")
     return compiled
 
 
