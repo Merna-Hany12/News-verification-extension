@@ -20,4 +20,10 @@ dependencies = [
     "torch>=2.2.0",
     "transformers>=4.40.0",
     "uvicorn[standard]>=0.30.0",
+    "yake>=0.7.3",
+]
+
+[dependency-groups]
+dev = [
+    "scikit-learn>=1.9.0",
 ]

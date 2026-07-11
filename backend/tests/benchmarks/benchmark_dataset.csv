@@ -1,0 +1,43 @@
+text,lang,expected_verdict
+NASA's Apollo 11 mission landed the first humans on the Moon in July 1969.,en,fact
+The World Health Organization declared COVID-19 a pandemic in March 2020.,en,fact
+Egypt and Ethiopia have been in long-running talks over the Grand Ethiopian Renaissance Dam on the Nile.,en,fact
+The 2022 FIFA World Cup was held in Qatar.,en,fact
+The Suez Canal was blocked for six days in March 2021 after a container ship ran aground.,en,fact
+Saudi Arabia and Egypt signed several economic cooperation agreements during a Gulf-Arab summit in 2023.,en,fact
+هبط رواد فضاء أبولو 11 على سطح القمر في يوليو 1969.,ar,fact
+أعلنت منظمة الصحة العالمية جائحة كورونا في مارس 2020.,ar,fact
+احتضنت قطر بطولة كأس العالم لكرة القدم عام 2022.,ar,fact
+توقف الملاحة في قناة السويس لمدة ستة أيام في مارس 2021 بعد جنوح سفينة حاويات.,ar,fact
+Scientists announced this week they have found a full cure for the common cold.,en,unverified
+A new species of dinosaur was discovered alive and well in the Amazon rainforest.,en,unverified
+A small European country has reportedly banned the internet entirely starting next month.,en,unverified
+Doctors now confirm eating chocolate every day adds ten years to your life.,en,unverified
+A hidden pyramid twice the size of the Great Pyramid of Giza was just found buried nearby.,en,unverified
+أعلن علماء هذا الأسبوع عن اكتشاف علاج نهائي لفيروس نقص المناعة البشرية.,ar,unverified
+تم العثور على مدينة أطلانطس المفقودة بالكامل تحت مياه البحر الأبيض المتوسط هذا الأسبوع.,ar,unverified
+أفادت تقارير غير مؤكدة بأن دولة عربية ستحظر استخدام النقود الورقية اعتباراً من الشهر المقبل.,ar,unverified
+What's your favorite pizza topping? Mine is definitely mushrooms.,en,non_news
+"Here's my grandmother's recipe for lemon cake, it takes about 40 minutes to bake.",en,non_news
+"I think Mondays should just be cancelled, who's with me?",en,non_news
+Can anyone recommend a good book to read on a rainy day?,en,non_news
+ما هو طبقك المفضل في رمضان؟ أنا أحب الكنافة كثيراً.,ar,non_news
+أشعر بالملل اليوم، هل لديكم اقتراحات لفيلم جيد لمشاهدته الليلة؟,ar,non_news
+"The United States launched new airstrikes against Iran, and Tehran responded by targeting U.S.-allied countries in the Mideast.",en,fact
+Iran's late Supreme Leader Ayatollah Ali Khamenei was buried in Mashhad after a multiday funeral procession.,en,fact
+New suspected Ebola cases have been reported in parts of Congo that were previously unaffected by the outbreak.,en,fact
+President Trump met Ukrainian President Volodymyr Zelenskyy at a NATO summit held in Turkey.,en,fact
+شنّت الولايات المتحدة ضربات جوية جديدة على إيران، وردّت طهران باستهداف دول حليفة لواشنطن في الشرق الأوسط.,ar,fact
+تم دفن المرشد الأعلى الإيراني الراحل آية الله علي خامنئي في مدينة مشهد بعد مراسم تشييع استمرت عدة أيام.,ar,fact
+"Iran and the United States have signed a permanent peace treaty this week, formally ending hostilities for good.",en,unverified
+The World Health Organization announced that the Ebola outbreak in Congo has been fully eradicated as of this month.,en,unverified
+NATO officials confirmed the alliance will dissolve entirely following this week's summit in Turkey.,en,unverified
+FIFA has reportedly moved the entire 2026 World Cup final to a new host city at the last minute.,en,unverified
+وقّعت إيران والولايات المتحدة معاهدة سلام دائمة هذا الأسبوع تنهي الأعمال العدائية نهائياً.,ar,unverified
+أعلنت منظمة الصحة العالمية القضاء الكامل على فيروس إيبولا في الكونغو هذا الشهر.,ar,unverified
+"I honestly think these US strikes on Iran are only going to make the region less stable, not more.",en,non_news
+"Whatever your politics, watching two elderly leaders bury a third at a funeral like that felt like the end of an era.",en,non_news
+My take on the World Cup so far: the underdog teams have been way more fun to watch than the favorites.,en,non_news
+I don't think another NATO summit is going to fix anything — it's the same photos every time.,en,non_news
+في رأيي، هذه الضربات لن تجلب سوى مزيد من عدم الاستقرار للمنطقة على المدى الطويل.,ar,non_news
+بصراحة، كأس العالم هذا الموسم كان الأجمل من ناحية المفاجآت رغم كل الانتقادات.,ar,non_news
