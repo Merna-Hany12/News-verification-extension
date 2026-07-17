@@ -71,7 +71,7 @@ LEAD_CHARS = 700   # inverted-pyramid convention: the core who/what/where lives
                    # BOTH extractors below
 
 # --- YAKE extractor (production default) -------------------------------------
-YAKE_TOP = 30        # cap on returned keywords: short queries stay fast + on-topic
+YAKE_TOP = 20        # cap on returned keywords: short queries stay fast + on-topic
 YAKE_NGRAM = 3     # allow 2-word phrases, e.g. "Saudi Arabia" not "saudi" + "arabia"
 YAKE_DEDUP_LIM =  0.5
 
@@ -126,7 +126,7 @@ def _extract_keywords_yake(text: str) -> Optional[str]:
 
 
 # --- Hand-rolled heuristic extractor (no external dependency) ----------------
-HEURISTIC_MAX_KEYWORDS = 8
+HEURISTIC_MAX_KEYWORDS = 20
 
 _TOKEN_RE = re.compile(r"[A-Za-z\u0600-\u06FF0-9]+")
 _SENT_END_RE = re.compile(r"[.!?؟]")
