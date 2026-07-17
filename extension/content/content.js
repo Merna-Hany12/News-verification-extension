@@ -1,4 +1,11 @@
-// ─── HAQQ Content Script v3 ───────────────────────────────
+// ─── HAQQ Content Script v4 ────────────────────────────────
+// v4 change: the old three buttons (text / image / video) are now two:
+//   • "content"  → merged text+image verification. Direct post text and
+//                  OCR text are extracted in PARALLEL; whichever is the
+//                  stronger signal is chosen and sent into the
+//                  classification + full verification pipeline.
+//   • "aimedia"  → real AI-generated / manipulated media detection,
+//                  covering both images and video from a single button.
 const PROCESSED_ATTR = "data-haqq-processed";
 const DEBUG = true;
 function log(...args) { if (DEBUG) console.log("[HAQQ]", ...args); }
@@ -93,6 +100,9 @@ function processPost(postEl) {
 }
 
 // ─── TOOLBAR ──────────────────────────────────────────────
+// Two buttons now:
+//   "content" — shown whenever there's text and/or an image to check
+//   "aimedia" — shown whenever there's an image and/or a video to check
 function buildToolbar(postEl, content) {
   const toolbar = document.createElement("div");
   toolbar.className = "haqq-toolbar";
@@ -104,18 +114,16 @@ function buildToolbar(postEl, content) {
 
   const grp = document.createElement("div");
   grp.className = "haqq-btn-group";
-  if (content.text)     grp.appendChild(makeBtn("text",  postEl, content));
-  if (content.imageUrl) grp.appendChild(makeBtn("image", postEl, content));
-  if (content.videoUrl) grp.appendChild(makeBtn("video", postEl, content));
+  if (content.text || content.imageUrl)                    grp.appendChild(makeBtn("content", postEl, content));
+  if (content.imageUrl || content.videoUrl)                 grp.appendChild(makeBtn("aimedia", postEl, content));
   toolbar.appendChild(grp);
 
   return toolbar;
 }
 
 const BTN_DEF = {
-  text:  { label: "📝 نص",    title: "تحقق من صحة النص" },
-  image: { label: "🖼️ صورة", title: "تحليل الصورة"      },
-  video: { label: "🎬 فيديو", title: "تحليل الفيديو"     },
+  content: { label: "🔍 تحقّق من المحتوى", title: "تحقق من النص والصورة معاً" },
+  aimedia: { label: "🤖 كشف وسائط AI",     title: "كشف الصور/الفيديوهات المولّدة أو المعدّلة بالذكاء الاصطناعي" },
 };
 
 function makeBtn(type, postEl, content) {
@@ -130,7 +138,7 @@ function makeBtn(type, postEl, content) {
 
   const setLoading = () => {
     btn.classList.add("haqq-btn--loading");
-    btn.innerHTML       = `<span class="haqq-spinner"></span>`;
+    btn.innerHTML       = `<span class="haqq-spinner"></span><span class="haqq-btn-loading-txt">جارٍ التحقق…</span>`;
     btn.disabled        = true;
     btn.dataset.loading = "true";
   };
@@ -145,7 +153,7 @@ function makeBtn(type, postEl, content) {
   const setError = (message) => {
     btn.classList.remove("haqq-btn--loading");
     btn.classList.add("haqq-btn--error");
-    btn.innerHTML = "⚠️";
+    btn.innerHTML = "⚠️ حدث خطأ";
     btn.title     = message;
     setTimeout(() => { setIdle(); btn.title = def.title; }, 3000);
   };
@@ -155,8 +163,7 @@ function makeBtn(type, postEl, content) {
     setLoading();
 
     try {
-      // FIX: removed waitForContentUpdate — it added up to 1500ms of
-      // unnecessary delay on every click. Content is re-extracted fresh here.
+      // Content is re-extracted fresh on every click (no artificial delay).
       const freshContent = extractAll(postEl);
 
       const finalContent = {
@@ -169,8 +176,6 @@ function makeBtn(type, postEl, content) {
       const result = await sendToBackground(type, finalContent);
       if (!result) throw new Error("لا استجابة من الخادم");
 
-      // FIX: handle non_news verdict cleanly — show a dismissible info badge
-      // instead of falling through to the unverified config silently.
       if (result.verdict === "non_news") {
         showNonNews(postEl, btn, type);
         return;
@@ -202,6 +207,7 @@ function detectLanguage(text) {
 
 // ─── TEXT CLEANING ────────────────────────────────────────
 function cleanText(raw) {
+  if (!raw) return "";
   return raw
     .toLowerCase()
     .replace(/#\w+/g, " ")
@@ -214,124 +220,136 @@ function cleanText(raw) {
     .trim();
 }
 
+// ─── RESULT SHAPE HELPER ──────────────────────────────────
+function result(verdict, confidence, explanation, sources = []) {
+  return { verdict, confidence, explanation, sources };
+}
+
 // ─── BACKGROUND MESSAGES ──────────────────────────────────
-// FIX: removed the duplicate AI classification call that was here before.
-// The service worker's verifyText already classifies internally — doing it
-// again in the content script added a full model round-trip of latency
-// before even starting the news search.
-// FIX: fixed function signature — was (type, content, postEl) but postEl
-// was never used inside. Now correctly (type, content).
 async function sendToBackground(type, content) {
+  if (type === "content") return verifyContent(content);
+  if (type === "aimedia") return verifyMedia(content);
+  throw new Error("Unknown verification type");
+}
 
-  if (type === "text" && content.text) {
-    const text = cleanText(content.text);
-    const lang = detectLanguage(text);
-    log("Detected language:", lang);
+// ─── MERGED TEXT + IMAGE VERIFICATION ─────────────────────
+// Runs direct-text handling and OCR extraction in parallel (OCR is the only
+// slow/async step — the caption text is already in hand), then decides
+// which extracted text is the stronger signal before sending it into the
+// classification + full LangGraph verification pipeline on the backend.
+const MIN_TEXT_LEN = 15;
 
-    return new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 25000);
-      chrome.runtime.sendMessage(
-        { type: "HAQQ_VERIFY_TEXT", payload: { text, lang } },
-        (res) => {
-          clearTimeout(t);
-          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-          if (!res)      return reject(new Error("لا استجابة"));
-          if (res.error) return reject(new Error(res.error));
-          resolve(res.data);
-        }
-      );
-    });
-  }
+async function verifyContent(content) {
+  const directText = cleanText(content.text || "");
 
-  // ─── IMAGE: try OCR first to extract text written inside the image.
-  //     If text is found → run the same HAQQ_VERIFY_TEXT pipeline used
-  //     for normal post text. If no text → fall back to the original
-  //     HAQQ_VERIFY_IMAGE (URL-keyword search). Nothing else changes.
-  if (type === "image" && content.imageUrl) {
-    let ocrText = "";
-    try {
-      const ocrRes = await new Promise((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error("timeout")), 30000);
+  // OCR is fired immediately, in parallel with everything below — it does
+  // NOT wait to find out whether the post text turns out to be enough, or
+  // whether the first verdict comes back unverified. This trades an extra
+  // /ocr backend call (even when it ends up unused) for lower latency on
+  // the retry path, since the OCR result is often already in hand by the
+  // time we know we need it.
+  const ocrPromise = content.imageUrl
+    ? new Promise((resolve) => {
+        const t = setTimeout(() => resolve(""), 30000);
         chrome.runtime.sendMessage(
           { type: "HAQQ_OCR_IMAGE", payload: { imageUrl: content.imageUrl } },
           (res) => {
             clearTimeout(t);
-            if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-            if (!res || res.error)        return resolve("");
+            if (chrome.runtime.lastError || !res || res.error) return resolve("");
             resolve(res.data?.text || "");
           }
         );
-      });
-      ocrText = ocrRes.trim();
-    } catch { ocrText = ""; }
+      })
+    : Promise.resolve("");
 
-    if (ocrText.length >= 10) {
-      // OCR succeeded — log full extracted text before passing to pipeline
-      const text = cleanText(ocrText);
-      const lang = detectLanguage(text);
+  console.log("%c[HAQQ] Content verification", "color:#8b5cf6;font-weight:bold");
+  console.log("[HAQQ] 📝 Post text:", directText.slice(0, 100), `(${directText.length} chars)`);
 
-      console.log("%c━━━━━━━━━━ [HAQQ] OCR RESULT ━━━━━━━━━━", "color:#f59e0b;font-weight:bold");
-      console.log("[HAQQ] 🔤 OCR RAW TEXT  :", ocrText);
-      console.log("[HAQQ] 🧹 CLEANED TEXT  :", text);
-      console.log("[HAQQ] 📏 LENGTH        :", text.length, "chars");
-      console.log("[HAQQ] 🌐 LANGUAGE      :", lang);
-      console.log("%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "color:#f59e0b;font-weight:bold");
+  // ── Case 1: post text alone isn't enough to work with — wait for the
+  // (already in-flight) OCR result and use whatever text it found instead.
+  if (directText.length < MIN_TEXT_LEN) {
+    console.log("[HAQQ] Post text too short — waiting for OCR…");
+    const ocrText = cleanText(await ocrPromise);
+    console.log("[HAQQ] 🔤 OCR text:", ocrText.slice(0, 100), `(${ocrText.length} chars)`);
 
-      return new Promise((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 25000);
-        chrome.runtime.sendMessage(
-          { type: "HAQQ_VERIFY_TEXT", payload: { text, lang } },
-          (res) => {
-            clearTimeout(t);
-            if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-            if (!res)      return reject(new Error("لا استجابة"));
-            if (res.error) return reject(new Error(res.error));
-            resolve(res.data);
-          }
-        );
-      });
+    if (ocrText.length < MIN_TEXT_LEN) {
+      return result("unverified", 0, "لا يوجد نص كافٍ في هذا المنشور للتحقق منه.", []);
     }
-
-    // No readable text in image — fall back to original URL-keyword search
-    log("No OCR text found — falling back to image URL search");
-    return new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 25000);
-      chrome.runtime.sendMessage(
-        { type: "HAQQ_VERIFY_IMAGE", payload: { imageUrl: content.imageUrl } },
-        (res) => {
-          clearTimeout(t);
-          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-          if (!res)      return reject(new Error("لا استجابة"));
-          if (res.error) return reject(new Error(res.error));
-          resolve(res.data);
-        }
-      );
-    });
+    return runVerifyText(ocrText);
   }
 
-  const msg = {
-    video: {
-      type:    "HAQQ_VERIFY_VIDEO",
-      payload: { videoUrl: content.videoUrl, videoPoster: content.videoPoster, text: content.text }
-    },
-  }[type];
+  // ── Case 2: post text is enough — verify it first, while OCR keeps
+  // running in the background regardless.
+  console.log("[HAQQ] Verifying post text first…");
+  const firstResult = await runVerifyText(directText);
 
+  // Only if it came back "unverified" — recognized as a claim worth
+  // checking, but nothing conclusive was found from the caption alone —
+  // do we use the OCR result (already in-flight, likely already resolved)
+  // and give it one more shot.
+  if (firstResult.verdict === "unverified") {
+    console.log("[HAQQ] First verdict was 'unverified' — using OCR result…");
+    const ocrText = cleanText(await ocrPromise);
+    console.log("[HAQQ] 🔤 OCR text:", ocrText.slice(0, 100), `(${ocrText.length} chars)`);
+
+    if (ocrText.length >= MIN_TEXT_LEN) {
+      console.log("[HAQQ] Retrying verification using OCR text…");
+      return runVerifyText(ocrText);
+    }
+  }
+
+  return firstResult;
+}
+
+// Sends a single piece of text through the /verify pipeline (classification
+// + full LangGraph verification on the backend).
+function runVerifyText(text) {
+  const lang = detectLanguage(text);
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 25000);
-    chrome.runtime.sendMessage(msg, (res) => {
-      clearTimeout(t);
-      if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-      if (!res)      return reject(new Error("لا استجابة"));
-      if (res.error) return reject(new Error(res.error));
-      resolve(res.data);
-    });
+    chrome.runtime.sendMessage(
+      { type: "HAQQ_VERIFY_TEXT", payload: { text: text.slice(0, 1000), lang } },
+      (res) => {
+        clearTimeout(t);
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (!res)      return reject(new Error("لا استجابة"));
+        if (res.error) return reject(new Error(res.error));
+        resolve(res.data);
+      }
+    );
+  });
+}
+
+// ─── AI-GENERATED / MANIPULATED MEDIA DETECTION ───────────
+// Single button covering both images and video — sends whichever URL(s)
+// are present to the GPU-accelerated detection pipeline on the backend.
+async function verifyMedia(content) {
+  if (!content.imageUrl && !content.videoUrl) {
+    return result("inconclusive", 0, "لا توجد صورة أو فيديو لتحليلها في هذا المنشور.", []);
+  }
+
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 30000);
+    chrome.runtime.sendMessage(
+      {
+        type: "HAQQ_DETECT_MEDIA",
+        payload: {
+          imageUrl: content.imageUrl || null,
+          videoUrl: content.videoUrl || null,
+        },
+      },
+      (res) => {
+        clearTimeout(t);
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (!res)      return reject(new Error("لا استجابة"));
+        if (res.error) return reject(new Error(res.error));
+        resolve(res.data);
+      }
+    );
   });
 }
 
 // ─── NON-NEWS BADGE ───────────────────────────────────────
-// FIX: non_news was missing from VERDICT_CFG so it silently fell through
-// to "unverified" and showed a confusing badge. Now it gets its own clean
-// dismissible notice instead.
 function showNonNews(postEl, btn, type) {
   postEl.querySelector(`.haqq-badge[data-type="${type}"]`)?.remove();
 
@@ -340,8 +358,9 @@ function showNonNews(postEl, btn, type) {
   badge.dataset.type = type;
   badge.innerHTML = `
     <div class="haqq-badge-bar">
+      <span class="haqq-badge-icon">💬</span>
       <span class="haqq-badge-typename">${TYPE_NAMES[type]}</span>
-      <span class="haqq-badge-verdict">💬 ليس خبراً</span>
+      <span class="haqq-badge-verdict">ليس خبراً</span>
       <span class="haqq-badge-right">
         <button class="haqq-dismiss" aria-label="إغلاق">✕</button>
       </span>
@@ -390,13 +409,16 @@ function insertToolbar(postEl, toolbar) {
 
 // ─── VERDICT BADGE ────────────────────────────────────────
 const VERDICT_CFG = {
-  fact:         { ar: "✅ موثوق",                      cls: "fact",       icon: "✅" },
-  verified:     { ar: "✅ موثوق",                      cls: "fact",       icon: "✅" },
-  unverified:   { ar: "⚠️ غير مؤكد",                  cls: "unverified", icon: "⚠️" },
-  fake:         { ar: "❌ مضلل على الأرجح",            cls: "fake",       icon: "❌" },
-  ai_generated: { ar: "🤖 مُولَّد بالذكاء الاصطناعي", cls: "ai",         icon: "🤖" },
+  fact:         { ar: "موثوق",                      cls: "fact",         icon: "✅" },
+  verified:     { ar: "موثوق",                      cls: "fact",         icon: "✅" },
+  real:         { ar: "حقيقي — غير مولَّد بالذكاء الاصطناعي", cls: "fact",  icon: "✅" },
+  unverified:   { ar: "غير مؤكد",                   cls: "unverified",   icon: "⚠️" },
+  inconclusive: { ar: "غير حاسم",                   cls: "unverified",   icon: "❔" },
+  fake:         { ar: "مضلل على الأرجح",            cls: "fake",         icon: "❌" },
+  manipulated:  { ar: "محرَّف / مُعدَّل",           cls: "manipulated",  icon: "🛠️" },
+  ai_generated: { ar: "مُولَّد بالذكاء الاصطناعي", cls: "ai",           icon: "🤖" },
 };
-const TYPE_NAMES = { text: "النص", image: "الصورة", video: "الفيديو" };
+const TYPE_NAMES = { content: "المحتوى", aimedia: "الوسائط" };
 
 function showVerdict(postEl, result, type, btn) {
   postEl.querySelector(`.haqq-badge[data-type="${type}"]`)?.remove();
@@ -424,6 +446,7 @@ function showVerdict(postEl, result, type, btn) {
 
   badge.innerHTML = `
     <div class="haqq-badge-bar">
+      <span class="haqq-badge-icon">${cfg.icon}</span>
       <span class="haqq-badge-typename">${name}</span>
       <span class="haqq-badge-verdict">${cfg.ar}</span>
       <span class="haqq-badge-right">
@@ -509,7 +532,7 @@ history.pushState = function (...a) { _push(...a); handleNav(); };
 window.addEventListener("popstate", handleNav);
 
 function init() {
-  log("HAQQ v3 init");
+  log("HAQQ v4 init");
   scanForPosts();
   [800, 2000, 4000, 7000].forEach(t => setTimeout(scanForPosts, t));
   observer.observe(document.body, { childList: true, subtree: true, attributes: false });
