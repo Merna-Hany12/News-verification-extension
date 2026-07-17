@@ -1,20 +1,20 @@
-/* ─── HAQQ Extension v3 ─────────────────────────────────── */
+/* ─── HAQQ Extension v4 ─────────────────────────────────── */
 
 /* ── Toolbar ── */
 .haqq-toolbar {
   display: flex !important;
   align-items: center !important;
-  gap: 8px !important;
-  padding: 8px 16px 6px !important;
-  background: #f0f2f5 !important;
+  gap: 10px !important;
+  padding: 10px 16px 8px !important;
+  background: linear-gradient(180deg, #f7f8fa 0%, #eef0f3 100%) !important;
   border-top: 1px solid #e4e6ea !important;
   flex-wrap: wrap !important;
 }
 
 .haqq-toolbar-lbl {
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  color: #606770 !important;
+  font-size: 12.5px !important;
+  font-weight: 800 !important;
+  color: #4a4d52 !important;
   font-family: 'Segoe UI', Arial, sans-serif !important;
   white-space: nowrap !important;
   letter-spacing: 0.3px !important;
@@ -23,7 +23,7 @@
 .haqq-btn-group {
   display: flex !important;
   align-items: center !important;
-  gap: 6px !important;
+  gap: 8px !important;
   flex-wrap: wrap !important;
 }
 
@@ -31,60 +31,61 @@
 .haqq-btn {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 5px !important;
-  padding: 5px 12px !important;
-  border-radius: 16px !important;
+  gap: 6px !important;
+  padding: 7px 14px !important;
+  border-radius: 18px !important;
   border: 1.5px solid transparent !important;
-  font-size: 12px !important;
-  font-weight: 600 !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
   font-family: 'Segoe UI', Arial, sans-serif !important;
   cursor: pointer !important;
-  transition: all 0.15s !important;
+  transition: transform 0.12s ease, box-shadow 0.15s ease, background 0.15s ease !important;
   white-space: nowrap !important;
   line-height: 1.4 !important;
   user-select: none !important;
   outline: none !important;
-  box-shadow: none !important;
   text-decoration: none !important;
   margin: 0 !important;
-  min-width: 60px !important;
+  min-width: 64px !important;
   justify-content: center !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+}
+.haqq-btn:hover:not(:disabled) {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.10) !important;
+}
+.haqq-btn:active:not(:disabled) {
+  transform: translateY(0) !important;
 }
 
-/* Text button — blue */
-.haqq-btn--text {
-  background: #e7f0fd !important;
-  border-color: #1877f2 !important;
-  color: #1877f2 !important;
+/* Merged content button (text + image) — blue/purple gradient */
+.haqq-btn--content {
+  background: linear-gradient(135deg, #e7f0fd 0%, #eee5ff 100%) !important;
+  border-color: #4f7fe0 !important;
+  color: #2c4bb0 !important;
 }
-.haqq-btn--text:hover:not(:disabled) {
-  background: #cce0ff !important;
-}
-
-/* Image button — purple */
-.haqq-btn--image {
-  background: #f0e6ff !important;
-  border-color: #8b5cf6 !important;
-  color: #6d28d9 !important;
-}
-.haqq-btn--image:hover:not(:disabled) {
-  background: #ddd6fe !important;
+.haqq-btn--content:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d9e8ff 0%, #e3d5ff 100%) !important;
 }
 
-/* Video button — green */
-.haqq-btn--video {
-  background: #e6f4ea !important;
-  border-color: #34a853 !important;
-  color: #1e8b3c !important;
+/* AI media detection button — warm orange/pink gradient, distinct energy */
+.haqq-btn--aimedia {
+  background: linear-gradient(135deg, #fff1e6 0%, #ffe3ef 100%) !important;
+  border-color: #f0630a !important;
+  color: #c1450a !important;
 }
-.haqq-btn--video:hover:not(:disabled) {
-  background: #c8e6c9 !important;
+.haqq-btn--aimedia:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ffe4cc 0%, #ffd0e2 100%) !important;
 }
 
 /* States */
 .haqq-btn--loading {
-  opacity: 0.75 !important;
+  opacity: 0.85 !important;
   cursor: wait !important;
+  box-shadow: none !important;
+}
+.haqq-btn-loading-txt {
+  font-size: 11.5px !important;
 }
 .haqq-btn--error {
   background: #fce8e6 !important;
@@ -92,11 +93,9 @@
   color: #c5221f !important;
 }
 .haqq-btn--done {
-  background: #e6f4ea !important;
-  border-color: #34a853 !important;
-  color: #1e8b3c !important;
-  min-width: 32px !important;
-  padding: 5px 8px !important;
+  min-width: 34px !important;
+  padding: 6px 10px !important;
+  font-size: 15px !important;
 }
 .haqq-btn:disabled {
   cursor: default !important;
@@ -118,41 +117,50 @@
 /* ── Verdict Badge ── */
 .haqq-badge {
   position: relative !important;
-  margin: 6px 12px 4px !important;
-  border-radius: 10px !important;
+  margin: 8px 12px 4px !important;
+  border-radius: 12px !important;
   border: 1.5px solid transparent !important;
   font-family: 'Segoe UI', Arial, sans-serif !important;
   direction: rtl !important;
-  animation: haqq-in 0.2s ease-out !important;
+  animation: haqq-in 0.22s cubic-bezier(0.2, 0.8, 0.3, 1) !important;
   overflow: hidden !important;
   z-index: 10 !important;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.06) !important;
 }
 @keyframes haqq-in {
-  from { opacity: 0; transform: translateY(-5px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* Badge color variants */
 .haqq-badge--fact,
-.haqq-badge--verified { background: #e6f4ea !important; border-color: #34a853 !important; }
-.haqq-badge--unverified { background: #fff8e1 !important; border-color: #f9ab00 !important; }
-.haqq-badge--fake     { background: #fce8e6 !important; border-color: #ea4335 !important; }
-.haqq-badge--ai       { background: #e8f0fe !important; border-color: #4285f4 !important; }
+.haqq-badge--verified   { background: #eaf7ee !important; border-color: #34a853 !important; }
+.haqq-badge--unverified { background: #fff9e6 !important; border-color: #f9ab00 !important; }
+.haqq-badge--fake       { background: #fdeceb !important; border-color: #ea4335 !important; }
+.haqq-badge--ai         { background: #eaf1fe !important; border-color: #4285f4 !important; }
+.haqq-badge--manipulated{ background: #fdf0e6 !important; border-color: #f0630a !important; }
+.haqq-badge--nonnews    { background: #f1f3f4 !important; border-color: #9aa0a6 !important; }
 
 /* Badge bar (top row) */
 .haqq-badge-bar {
   display: flex !important;
   align-items: center !important;
   gap: 8px !important;
-  padding: 9px 12px 7px !important;
+  padding: 10px 12px 8px !important;
   flex-wrap: wrap !important;
+}
+
+.haqq-badge-icon {
+  font-size: 16px !important;
+  line-height: 1 !important;
+  flex-shrink: 0 !important;
 }
 
 .haqq-badge-typename {
   font-size: 10px !important;
-  font-weight: 700 !important;
+  font-weight: 800 !important;
   background: rgba(0,0,0,0.08) !important;
-  padding: 2px 7px !important;
+  padding: 3px 8px !important;
   border-radius: 10px !important;
   color: #333 !important;
   text-transform: uppercase !important;
@@ -160,8 +168,8 @@
 }
 
 .haqq-badge-verdict {
-  font-size: 14px !important;
-  font-weight: 700 !important;
+  font-size: 14.5px !important;
+  font-weight: 800 !important;
   color: #111 !important;
   flex: 1 !important;
 }
@@ -176,9 +184,9 @@
 
 .haqq-pct {
   font-size: 11px !important;
-  font-weight: 700 !important;
+  font-weight: 800 !important;
   background: rgba(0,0,0,0.09) !important;
-  padding: 2px 8px !important;
+  padding: 3px 9px !important;
   border-radius: 10px !important;
   color: #444 !important;
 }
@@ -196,15 +204,15 @@
 .haqq-badge-expl {
   font-size: 13px !important;
   color: #333 !important;
-  line-height: 1.55 !important;
-  margin: 0 12px 8px !important;
+  line-height: 1.6 !important;
+  margin: 0 12px 9px !important;
   padding: 0 !important;
 }
 
 /* Sources section */
 .haqq-sources {
   border-top: 1px solid rgba(0,0,0,0.08) !important;
-  padding: 7px 12px 9px !important;
+  padding: 8px 12px 10px !important;
   display: flex !important;
   flex-direction: column !important;
   gap: 5px !important;
@@ -212,7 +220,7 @@
 
 .haqq-src-lbl {
   font-size: 11px !important;
-  font-weight: 700 !important;
+  font-weight: 800 !important;
   color: #666 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.4px !important;
@@ -226,21 +234,21 @@
 
 .haqq-src-link {
   display: block !important;
-  padding: 5px 10px !important;
-  background: rgba(255,255,255,0.6) !important;
-  border-radius: 6px !important;
+  padding: 6px 10px !important;
+  background: rgba(255,255,255,0.7) !important;
+  border-radius: 8px !important;
   text-decoration: none !important;
   transition: background 0.12s !important;
   border: 1px solid rgba(0,0,0,0.06) !important;
 }
 .haqq-src-link:hover {
-  background: rgba(255,255,255,0.9) !important;
+  background: rgba(255,255,255,0.95) !important;
 }
 
 .haqq-src-title {
   font-size: 12px !important;
   color: #1877f2 !important;
-  font-weight: 500 !important;
+  font-weight: 600 !important;
   text-decoration: underline !important;
   display: block !important;
   overflow: hidden !important;
@@ -255,10 +263,11 @@
   cursor: pointer !important;
   font-size: 13px !important;
   color: #888 !important;
-  padding: 2px 5px !important;
-  border-radius: 4px !important;
+  padding: 3px 6px !important;
+  border-radius: 6px !important;
   line-height: 1 !important;
   margin: 0 !important;
+  transition: background 0.12s, color 0.12s !important;
 }
 .haqq-dismiss:hover {
   background: rgba(0,0,0,0.08) !important;

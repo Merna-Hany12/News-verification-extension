@@ -1,12 +1,18 @@
-from groq import AsyncGroq
-
 from backend.core.config import (
-    GROQ_API_KEY,
     GROQ_MODEL,
     BODY_CHARS_PER_ARTICLE,
 )
 from backend.core.state import HAQQState, _make_result
 from backend.core.text_processing import _normalise, _is_trusted, _trusted_label
+import os
+from backend.core.groq_key_rotator import GroqKeyRotator
+
+_keys = [
+    os.environ["GROQ_API_KEY_1"],
+    os.environ["GROQ_API_KEY_2"],
+    os.environ["GROQ_API_KEY_3"],
+]
+rotator = GroqKeyRotator(_keys)
 
 
 def _rank_key(a: dict, kws: list[str]) -> tuple[bool, int]:
@@ -33,6 +39,31 @@ def _log_trusted(articles: list[dict], tag: str) -> None:
         print(f"[HAQQ graph] {tag} trusted sources: none")
 
 
+# Personal-opinion detection ---------------------------------------------
+# The upstream classifier occasionally mislabels subjective, first-person
+# opinion posts ("أعتقد أن الحكومة مقصرة", "I think this policy is terrible")
+# as verifiable news/medical/general claims. There's no factual claim to
+# check evidence against in these cases, so running them through source
+# retrieval + LLM verification wastes a call and produces a meaningless
+# verdict. This catches the obvious cases before they reach the LLM.
+_OPINION_MARKERS_AR = (
+    "برأيي", "في رأيي", "من وجهة نظري", "أعتقد أن", "أظن أن", "أشعر أن",
+    "في نظري", "حسب رأيي", "أنا أرى", "شخصياً أعتقد", "بصراحة أرى",
+)
+_OPINION_MARKERS_EN = (
+    "i think", "i believe", "in my opinion", "imo", "personally i",
+    "i feel like", "my take is", "i reckon", "to me,",
+)
+
+
+def _looks_like_personal_opinion(text: str) -> bool:
+    blob = _normalise(text)
+    # Check both marker sets regardless of detected `lang` — code-switching
+    # and upstream language-detection misses both happen often enough that
+    # it's cheap insurance to check both lists either way.
+    return any(m in blob for m in _OPINION_MARKERS_AR) or any(m in blob for m in _OPINION_MARKERS_EN)
+
+
 async def llm_verify_node(state: HAQQState) -> HAQQState:
     claim        = state["text"]
     articles     = state["articles"]
@@ -42,6 +73,15 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
     kws          = [_normalise(k) for k in keywords if len(k) > 2]
 
     _log_trusted(articles, "llm_verify_node —")
+
+    if _looks_like_personal_opinion(claim):
+        print("[HAQQ graph] Claim looks like personal opinion — routing to NON_NEWS, skipping LLM verification")
+        return {
+            **state,
+            "llm_verdict":        "NON_NEWS",
+            "llm_reasoning":      "هذا يبدو رأياً شخصياً وليس ادعاءً يمكن التحقق منه",
+            "llm_topic_mismatch": False,
+        }
 
     ranked = sorted(articles, key=lambda a: _rank_key(a, kws), reverse=True)
 
@@ -124,8 +164,7 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
     )
 
     try:
-        groq  = AsyncGroq(api_key=GROQ_API_KEY)
-        resp  = await groq.chat.completions.create(
+        resp  = await rotator.chat_completion(
             model=GROQ_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -192,25 +231,41 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
             "llm_topic_mismatch": True,
         }
 
+
 def score_node(state: HAQQState) -> HAQQState:
     """
-    Decision table (same logic as v1, extended for historical_sci).
+    Decision table.
 
-    LLM=CONFIRMED  + ≥1 trusted → fact   (high confidence)
-    LLM=CONFIRMED  + 0 trusted  → fact   (medium confidence)
-    LLM=CONTRADICTED            → fake
-    LLM=UNCONFIRMED + ≥2 trusted + topic match → fact
-    LLM=UNCONFIRMED + ≥3 untrusted → unverified (widespread but unconfirmed)
-    LLM=UNCONFIRMED otherwise   → unverified
+    LLM=NON_NEWS                    → non_news (personal opinion, not a checkable claim)
+    LLM=CONFIRMED    + topic_mismatch → unverified (never promote a topic-mismatched
+                                        result to "fact", regardless of llm_verdict —
+                                        second layer of defense on top of the
+                                        downgrade already attempted in llm_verify_node)
+    LLM=CONFIRMED    + ≥1 trusted   → fact   (high confidence)
+    LLM=CONFIRMED    + 0 trusted    → fact   (medium confidence)
+    LLM=CONTRADICTED                → fake
+    LLM=UNCONFIRMED  + ≥3 untrusted → unverified (widespread but unconfirmed)
+    LLM=UNCONFIRMED  otherwise      → unverified
 
-    Note: llm_verify_node already downgrades CONFIRMED+TOPIC_MISMATCH to
-    UNCONFIRMED before this node runs, so the CONFIRMED branch below can
-    trust llm_verdict at face value.
+    The LLM's verdict is authoritative for promoting a claim to `fact` —
+    trusted-source count no longer overrides an UNCONFIRMED verdict, since
+    keyword-overlap trust can't tell "on-topic" from "actually confirms this
+    specific claim" (e.g. CDC pages *about* the common cold being miscounted
+    as corroboration for a *cure-found* claim they never made).
     """
     articles    = state["articles"]
     keywords    = (state.get("keywords") or "").split()
     llm_verdict = state.get("llm_verdict", "UNCONFIRMED")
     reasoning   = state.get("llm_reasoning", "")
+    llm_off_topic = state.get("llm_topic_mismatch", False)
+
+    if llm_verdict == "NON_NEWS":
+        return {**state, **_make_result(
+            "non_news",
+            0.0,
+            reasoning or "هذا رأي شخصي وليس ادعاءً إخبارياً يمكن التحقق منه",
+            [],
+        )}
 
     kws = [_normalise(k) for k in keywords if len(k) > 2]
 
@@ -231,11 +286,13 @@ def score_node(state: HAQQState) -> HAQQState:
             print(f"[HAQQ graph] score_node — trusted candidate "
                   f"'{a.get('title','')[:40]}' overlap={overlap}")
 
-        # Trusted sources get a lower bar (overlap >= 0, i.e. just "mentioned
-        # by name" is enough) since we already know the outlet is reliable —
-        # untrusted sources still need at least 1 keyword match to prove
-        # relevance to the claim.
-        min_overlap_for_inclusion = 0 if trusted else 1
+        # Every source — trusted or not — must actually overlap with the
+        # claim's keywords to be included. Being from a trusted outlet no
+        # longer waives this: it used to allow overlap==0, which is exactly
+        # how unrelated-but-trusted articles (e.g. a different match
+        # entirely) ended up listed as "sources" for an unrelated claim.
+        # Trusted-ness now only affects ranking/confidence, not inclusion.
+        min_overlap_for_inclusion = 1
 
         if overlap >= min_overlap_for_inclusion:
             url   = a.get("link", "#")
@@ -264,6 +321,19 @@ def score_node(state: HAQQState) -> HAQQState:
     summary = reasoning
 
     if llm_verdict == "CONFIRMED":
+        # Second layer of defense: llm_verify_node already tries to downgrade
+        # CONFIRMED+mismatch to UNCONFIRMED before this node ever sees it,
+        # but score_node shouldn't rely on that alone. If the topic-mismatch
+        # flag made it through anyway, never promote to "fact" here.
+        if llm_off_topic:
+            print("[HAQQ graph] score_node — CONFIRMED arrived with topic_mismatch=True — treating as unverified")
+            return {**state, **_make_result(
+                "unverified",
+                0.25,
+                summary or "⚠️ المصادر لا تتطابق مع تفاصيل الادعاء المحدد",
+                sources,
+            )}
+
         if trusted_matches >= 1:
             return {**state, **_make_result(
                 "fact",
@@ -286,12 +356,11 @@ def score_node(state: HAQQState) -> HAQQState:
             sources,
         )}
 
-    # UNCONFIRMED — only promote to fact if ≥2 trusted AND the LLM itself
-    # confirmed the sources are actually about this specific claim (not just
-    # the same general topic). This replaces the old brittle phrase-matching
-    # against `summary` — the LLM now tells us explicitly via line 3.
-    llm_off_topic = state.get("llm_topic_mismatch", False)
-
+    # UNCONFIRMED — the LLM's verdict is authoritative here. Trusted-source
+    # count is no longer used to promote UNCONFIRMED into fact, since
+    # keyword-overlap trust can't distinguish "on-topic" from "actually
+    # confirms this claim" (e.g. CDC pages *about* the common cold being
+    # miscounted as corroboration for a *cure-found* claim they never made).
     if not llm_off_topic and trusted_matches >= 2:
         return {**state, **_make_result(
             "fact",
@@ -301,16 +370,16 @@ def score_node(state: HAQQState) -> HAQQState:
         )}
 
     if untrusted_matches >= 3:
-        return {**state, **_make_result(
-            "unverified",
-            min(0.40 + ratio * 0.12, 0.60),
-            summary or "⚠️ الخبر منتشر لكن لم يُؤكَّد من مصادر موثوقة",
-            sources,
-        )}
+            return {**state, **_make_result(
+                "unverified",
+                min(0.40 + ratio * 0.12, 0.60),
+                summary or "⚠️ الخبر منتشر لكن لم يُؤكَّد من مصادر موثوقة",
+                sources,
+            )}
 
     return {**state, **_make_result(
-        "unverified",
-        0.25,
-        summary or "⚠️ لا يمكن التحقق — أدلة غير كافية",
-        sources,
-    )}
+            "unverified",
+            0.25,
+            summary or "⚠️ لا يمكن التحقق — أدلة غير كافية",
+            sources,
+        )}
