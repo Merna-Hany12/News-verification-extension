@@ -1,47 +1,187 @@
-from fastapi import APIRouter, Request
+import os
+import tempfile
+import cv2
+import numpy as np
+import torch
+import httpx
+from PIL import Image
+from fastapi import APIRouter, Request, HTTPException
 
 from backend.api.schemas import DetectMediaRequest
 
 router = APIRouter()
 
+# ─── 1. Face-Aware Fusion Logic ───
+def face_aware_fusion(avg_df_prob: float, avg_ai_prob: float, pct_faces_detected: float):
+    """
+    Face-detection-aware fusion.
+    If faces are meaningfully present, trust the deepfake model first.
+    Fall back to AIGC model only when no faces are detected.
+    """
+    FACE_THRESHOLD = 25.0  # If more than 25% of frames have faces
 
+    # Case 1: Faces detected → Deepfake model has the right context → trust it first
+    if pct_faces_detected >= FACE_THRESHOLD:
+        if avg_df_prob >= 0.50:
+            return {
+                "verdict": "manipulated",  # Maps to "Deepfake" in the extension
+                "confidence": float(avg_df_prob),
+                "explanation": "تم اكتشاف تلاعب في الوجوه (Deepfake).",
+                "sources": []
+            }
+        elif avg_ai_prob >= 0.50:
+            return {
+                "verdict": "ai_generated",
+                "confidence": float(avg_ai_prob),
+                "explanation": "المحتوى مولد بالذكاء الاصطناعي.",
+                "sources": []
+            }
+
+    # Case 2: No significant faces → AIGC model is the primary evidence
+    else:
+        if avg_ai_prob >= 0.50:
+            return {
+                "verdict": "ai_generated",
+                "confidence": float(avg_ai_prob),
+                "explanation": "المحتوى مولد بالذكاء الاصطناعي.",
+                "sources": []
+            }
+
+    # Case 3: All signals are weak → Real
+    p_real = (1.0 - avg_df_prob) * (1.0 - avg_ai_prob)
+    return {
+        "verdict": "real",
+        "confidence": float(p_real),
+        "explanation": "لم يتم اكتشاف تلاعب أو توليد بالذكاء الاصطناعي.",
+        "sources": []
+    }
+
+# ─── 2. Route Handler ───
 @router.post("/detect-media")
 async def detect_media(request: DetectMediaRequest, req: Request):
-    """
-    AI-generated / manipulated media detection for images and video.
+    if not request.video_url:
+        return {"verdict": "inconclusive", "confidence": 0.0, "explanation": "الصور غير مدعومة بعد.", "sources": []}
 
-    ─── TODO: replace the stub body below with the real GPU-accelerated
-    detection ensemble. Rough shape to build toward:
-      1. Download the image (and/or sample frames from the video) —
-         same pattern as ocr_image() in routes.py, via http_requests.get(...).
-      2. Preprocess: resize, normalize, format-check.
-      3. Run through the detection ensemble on GPU, with early-exit logic
-         (cheap/fast signals first, escalate to heavier detectors only
-         if inconclusive).
-      4. Fuse per-method scores into one overall verdict + confidence.
-      5. For video: aggregate per-frame verdicts into one clip verdict.
+    target_url = request.video_url
+    print(f"[HAQQ] Processing video URL: {target_url[:80]}...")
 
-    Once ready, load whatever models you need onto app.state at startup
-    inside main.py's lifespan() — same pattern as classifier / ocr_reader —
-    and pull them here with getattr(req.app.state, "your_model_name", None).
-    """
-    if not request.image_url and not request.video_url:
-        return {
-            "verdict": "inconclusive",
-            "confidence": 0.0,
-            "explanation": "لا توجد وسائط لتحليلها.",
-            "sources": [],
+    yunet = req.app.state.yunet
+    gend_model = req.app.state.gend_model
+    aigc_pipeline = req.app.state.aigc_pipeline
+
+    # 1. Download to Temp File
+    fd, temp_path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(target_url, follow_redirects=True)
+            resp.raise_for_status()
+            with open(temp_path, "wb") as f:
+                f.write(resp.content)
+
+        # 2. Extract Frames with OpenCV
+        cap = cv2.VideoCapture(temp_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames == 0:
+            raise HTTPException(status_code=400, detail="Could not read video frames")
+            
+        n_frames = 8
+        frame_indices = [int(i * (total_frames - 1) / (n_frames - 1)) for i in range(n_frames)]
+        
+        frames = []
+        for idx in frame_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame_bgr = cap.read()
+            if ret:
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                frames.append(Image.fromarray(frame_rgb))
+        cap.release()
+
+        # 3. Process Frames with YuNet
+        processed_images = []
+        faces_detected = []
+        margin = 20
+
+        for frame in frames:
+            frame_cv = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+            h, w, _ = frame_cv.shape
+            yunet.setInputSize((w, h))
+            
+            _, faces = yunet.detect(frame_cv)
+            
+            if faces is not None and len(faces) > 0:
+                box = faces[0][:4].astype(int)
+                x, y, bw, bh = box
+                x1 = max(0, x - margin)
+                y1 = max(0, y - margin)
+                x2 = min(w, x + bw + margin)
+                y2 = min(h, y + bh + margin)
+                
+                face_crop = frame.crop((x1, y1, x2, y2))
+                processed_images.append(face_crop)
+                faces_detected.append(True)
+            else:
+                processed_images.append(frame)
+                faces_detected.append(False)
+
+        # 4. GenD Inference (Only on Face Frames)
+        deepfake_scores = []
+        face_images = [img for img, has_face in zip(processed_images, faces_detected) if has_face]
+        
+        if face_images:
+            tensors = [gend_model.feature_extractor.preprocess(img) for img in face_images]
+            batch_tensor = torch.stack(tensors).to(gend_model.device)
+            with torch.no_grad():
+                logits = gend_model(batch_tensor)
+                probs = torch.softmax(logits, dim=-1).cpu().numpy()
+                deepfake_scores = [float(p[1]) for p in probs]
+                
+        avg_df_prob = float(np.mean(deepfake_scores)) if deepfake_scores else 0.0
+
+        # 5. SigLIP Inference (On All Original Frames)
+        aigc_scores = []
+        for frame in frames:
+            res = aigc_pipeline(frame)
+            aigc_dict = {item['label'].lower(): item['score'] for item in res}
+            aigc_scores.append(aigc_dict.get('ai', 0.0))
+            
+        avg_ai_prob = float(np.mean(aigc_scores)) if aigc_scores else 0.0
+
+        # 6. Face-Aware Fusion
+        pct_faces = (sum(faces_detected) / len(frames)) * 100.0
+        result = face_aware_fusion(avg_df_prob, avg_ai_prob, pct_faces)
+        
+         # ---- print statements ----
+        print("\n" + "="*50)
+        print("[HAQQ MEDIA PIPELINE RESULTS]")
+        print(f"Total Frames Analyzed: {len(frames)}")
+        print(f"Frames with Faces:     {sum(faces_detected)} ({pct_faces:.1f}%)")
+        print(f"Avg Deepfake Score:    {avg_df_prob:.3f} (GenD)")
+        print(f"Avg AI-Gen Score:      {avg_ai_prob:.3f} (SigLIP)")
+        print(f"FINAL VERDICT:         {result['verdict'].upper()} (Conf: {result['confidence']:.3f})")
+        print("="*50 + "\n")
+        # -----------------------------------------
+        
+        # Attach metadata for debugging
+        result["metadata"] = {
+            "avg_df_prob": avg_df_prob,
+            "avg_ai_prob": avg_ai_prob,
+            "faces_detected": sum(faces_detected)
         }
+        return result
 
-    target      = request.video_url or request.image_url
-    media_kind  = "فيديو" if request.video_url else "صورة"
-    print(f"[HAQQ] /detect-media stub called for {media_kind}: {target[:80]}")
-
-    # ─── STUB LOGIC — delete once the real models are wired in ───
-    return {
-        "verdict": "inconclusive",
-        "confidence": 0.0,
-        "explanation": f"(محاكاة مؤقتة) لم يتم بعد ربط نموذج الكشف الفعلي — {media_kind} قيد الانتظار.",
-        "sources": [],
-    }
-    # ─── END STUB LOGIC ───
+    finally:
+        # 7. Cleanup: Delete Temp File Instantly
+        # 7. Cleanup: Release OpenCV and Delete Temp File Instantly
+        try:
+            if 'cap' in locals() and cap is not None:
+                cap.release()
+        except Exception:
+            pass
+            
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
