@@ -14,3 +14,7 @@ class VerifyRequest(BaseModel):
 class DetectMediaRequest(BaseModel):
     image_url: Optional[str] = None
     video_url: Optional[str] = None
+class VerifyContentRequest(BaseModel):
+    text: Optional[str] = None
+    image_url: Optional[str] = None
+    lang: str = "ar"
