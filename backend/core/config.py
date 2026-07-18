@@ -15,9 +15,9 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY",     "")
 GROQ_MODEL   = os.environ.get("GROQ_MODEL",       "llama-3.3-70b-versatile")
 
 # How many chars of article body to pass to the LLM per article
-BODY_CHARS_PER_ARTICLE = 800
+BODY_CHARS_PER_ARTICLE = 500
 # How many articles to actually fetch the body for (costs time)
-BODY_FETCH_TOP_N = 3
+BODY_FETCH_TOP_N = 2
 
 # Query character limits
 API_QUERY_LIMIT    = 95
@@ -55,6 +55,8 @@ TRUSTED: set[str] = {
     "almasryalyoum", "shorouk", "elshorouk", "vetogate",
     "filbalad", "mobtada", "dotmsr", "elbashayer", "cairo24",
     "sis", "egypttoday", "dailynewsegypt", "ahramonline",
+    #sports
+    "fifa",
 }
 
 # ─── MEDICAL TRUSTED SOURCES ─────────────────────────────────────────────────
