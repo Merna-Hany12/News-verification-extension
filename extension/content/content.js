@@ -104,31 +104,42 @@ const PLATFORM_CONFIG = {
       '[aria-label^="React with Like to"]',
     ],
   },
-  instagram: {
-    mediaOnly: true,
-    postSelector: 'article',
-    seeMoreLabels: ["more", "... more", "المزيد"],
-    toolbarAnchorSelectors: [
-      'section svg[aria-label="Send Post"]',
-      'section svg[aria-label="Share"]',
-      'section svg[aria-label="Comment"]',
-      'section svg[aria-label="Like"]',
-    ],
-  },
-  tiktok: {
-    mediaOnly: true,
-    postSelector: [
-      '[data-e2e="recommend-list-item-container"]',
-      '[data-e2e="feed-video"]',
-      '[data-e2e="browse-video"]',
-    ].join(", "),
-    seeMoreLabels: ["more"],
-    toolbarAnchorSelectors: [
-      '[data-e2e="share-icon"]',
-      '[data-e2e="comment-icon"]',
-      '[data-e2e="like-icon"]',
-    ],
-  },
+instagram: {
+  mediaOnly: true,
+  postSelector: 'article',
+  seeMoreLabels: ["more", "... more", "المزيد"],
+  toolbarAnchorSelectors: [
+    'section svg[aria-label="Send Post"]',
+    'section svg[aria-label="Share"]',
+    'section svg[aria-label="Comment"]',
+    'section svg[aria-label="Like"]',
+  ],
+  // Where the button icon should sit — right before the bookmark icon,
+  // matching the gap in the marked screenshot. VERIFY LIVE — IG's
+  // bookmark aria-label has been "Save" historically but changes.
+  buttonInsertBeforeSelectors: [
+    'section svg[aria-label="Save"]',
+  ],
+},
+tiktok: {
+  mediaOnly: true,
+  postSelector: [
+    '[data-e2e="recommend-list-item-container"]',
+    '[data-e2e="feed-video"]',
+    '[data-e2e="browse-video"]',
+  ].join(", "),
+  seeMoreLabels: ["more"],
+  toolbarAnchorSelectors: [
+    '[data-e2e="share-icon"]',
+    '[data-e2e="comment-icon"]',
+    '[data-e2e="like-icon"]',
+  ],
+  // Insert right before the like (heart) icon — the gap right after
+  // the avatar, matching the marked screenshot.
+  buttonInsertBeforeSelectors: [
+    '[data-e2e="like-icon"]',
+  ],
+},
 };
 
 
@@ -138,10 +149,14 @@ const POST_SELECTOR = CFG.postSelector;
 // ─── VALIDATE ─────────────────────────────────────────────
 function isValidPost(el) {
   if (el.hasAttribute(PROCESSED_ATTR)) {
-    const panel = el.querySelector(".haqq-panel[data-haqq-owned]");
-    if (!panel || !panel.isConnected) {
-      // Our panel got wiped by the platform's own re-render — un-mark
-      // this post so the next scan cycle rebuilds and re-inserts it.
+    // Buttons may live either directly in the native icon row/column
+    // (Instagram/TikTok) or inside .haqq-panel (Facebook, or wherever
+    // insertButtonsIntoActionColumn couldn't find its anchor). Check
+    // for the button group ANYWHERE under this post, not just inside
+    // a panel — a panel may legitimately not exist yet if no badge has
+    // been shown for this post.
+    const btnGroup = el.querySelector('.haqq-btn-group[data-haqq-owned]');
+    if (!btnGroup || !btnGroup.isConnected) {
       el.removeAttribute(PROCESSED_ATTR);
     } else {
       return false;
@@ -156,7 +171,6 @@ function isValidPost(el) {
   if (!CFG.mediaOnly && (!el.innerText || el.innerText.trim().length < 10)) return false;
   return true;
 }
-
 
 // ─── EXTRACT ──────────────────────────────────────────────
 function extractAll(postEl) {
@@ -229,18 +243,35 @@ function processPost(postEl) {
 
   if (!hasContentBtn && !hasMediaBtn) return;
 
-  // TikTok: mark with the video's actual src, so a later swap to a
-  // DIFFERENT video (recycled node) is detectable. Other platforms:
-  // plain boolean, unchanged.
   if (PLATFORM === "tiktok") {
     postEl.setAttribute(PROCESSED_ATTR, content.videoUrl || "true");
   } else {
     postEl.setAttribute(PROCESSED_ATTR, "true");
   }
 
-  const toolbar = buildToolbar(postEl, content);
-  const panel = getOrCreatePanel(postEl);
-  panel.appendChild(toolbar);
+  const grp = document.createElement("div");
+  grp.className = "haqq-btn-group";
+  grp.setAttribute("data-haqq-owned", "true");  
+
+  if (hasContentBtn) grp.appendChild(makeBtn("content", postEl, content));
+  if (hasMediaBtn)   grp.appendChild(makeBtn("aimedia", postEl, content));
+
+  // Instagram/TikTok: buttons go INTO the native icon row/column,
+  // matching native icon format. Facebook: unchanged, buttons stay in
+  // the panel below the action row (no native-row insertion point was
+  // requested for Facebook).
+  const insertedNatively =
+    (PLATFORM === "instagram" || PLATFORM === "tiktok") &&
+    insertButtonsIntoActionColumn(postEl, grp);
+
+  if (!insertedNatively) {
+    const panel = getOrCreatePanel(postEl);
+    panel.appendChild(grp);
+  }
+
+  // Badge ALWAYS goes in the separate panel, regardless of where the
+  // buttons ended up — this is what guarantees it never overlaps any
+  // native icon, on any platform.
 }
 
 // ─── TOOLBAR ──────────────────────────────────────────────
@@ -718,7 +749,26 @@ function normalise(str) {
     .replace(/\s+/g, " ")
     .trim();
 }
-
+// Inserts the HAQQ button(s) directly INTO the platform's own icon
+// row/column, sized to match its native icons — as opposed to
+// getOrCreatePanel(), which is used ONLY for the verdict badge and
+// deliberately stays a separate sibling block so it never overlaps or
+// crushes the native Like/Comment/Share/Bookmark icons.
+function insertButtonsIntoActionColumn(postEl, buttonGroup) {
+  const beforeSelectors = CFG.buttonInsertBeforeSelectors || [];
+  for (const sel of beforeSelectors) {
+    const beforeEl = postEl.querySelector(sel);
+    if (!beforeEl) continue;
+    // Climb to the actual icon wrapper (the SVG/div's direct clickable
+    // container), not the bare <svg> itself, so our button sits as a
+    // sibling of the OTHER ICON WRAPPERS, not nested inside one.
+    const wrapper = beforeEl.closest('div, button') || beforeEl;
+    wrapper.parentElement?.insertBefore(buttonGroup, wrapper);
+    log(`Buttons inserted before "${sel}" in native column (${PLATFORM})`);
+    return true;
+  }
+  return false;
+}
 // ─── SCAN + OBSERVER ──────────────────────────────────────
 function scanForPosts() {
   if (!isContextValid()) { killIfContextInvalid(); return; }

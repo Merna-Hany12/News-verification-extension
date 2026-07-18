@@ -499,3 +499,120 @@ html[data-haqq-platform="instagram"] .haqq-badge--manipulated,
 html[data-haqq-platform="tiktok"] .haqq-badge--manipulated {
   background: linear-gradient(rgba(240,99,10,0.14), rgba(240,99,10,0.14)), #1a1a1a !important;
 }
+/* Instagram — buttons sit inline in the action row, matched to IG's
+   own icon size (roughly 24px glyph, no background pill). */
+/* Instagram native icon style */
+html[data-haqq-platform="instagram"] .haqq-toolbar{
+    display:flex !important;
+    margin-left:12px !important;
+}
+
+html[data-haqq-platform="instagram"] .haqq-btn-group{
+    display:flex !important;
+    gap:0 !important;
+}
+
+html[data-haqq-platform="instagram"] .haqq-btn{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    width:24px !important;
+    height:24px !important;
+    min-width:24px !important;
+
+    padding:0 !important;
+    margin:12px !important;
+
+    background:transparent !important;
+    border:none !important;
+    border-radius:0 !important;
+    box-shadow:none !important;
+
+    color:#f5f5f5 !important;
+}
+
+html[data-haqq-platform="instagram"] .haqq-btn:hover{
+    background:transparent !important;
+    transform:none !important;
+}
+
+html[data-haqq-platform="instagram"] .haqq-icon{
+    width:24px !important;
+    height:24px !important;
+    color:#f5f5f5 !important;
+    stroke:currentColor !important;
+}
+
+html[data-haqq-platform="instagram"] .haqq-btn--done,
+html[data-haqq-platform="instagram"] .haqq-btn--error{
+    width:24px !important;
+    height:24px !important;
+    min-width:24px !important;
+}
+
+html[data-haqq-platform="instagram"] .haqq-spinner{
+    width:18px !important;
+    height:18px !important;
+    border-top-color:#ffffff !important;
+}
+/* TikTok — buttons sit in the vertical column, matched to TikTok's own
+   circular icon size (its heart/comment/bookmark icons run ~40-48px). */
+/* Make HAQQ behave like a native TikTok action */
+/* Native TikTok action size */
+html[data-haqq-platform="tiktok"] .haqq-btn{
+    width:48px !important;
+    height:48px !important;
+    min-width:48px !important;
+    max-width:48px !important;
+    max-height:48px !important;
+
+    padding:0 !important;
+    margin:0 !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    border:none !important;
+    border-radius:50% !important;
+
+    background:#252525 !important;
+    box-shadow:none !important;
+    flex:0 0 48px !important;
+}
+
+html[data-haqq-platform="tiktok"] .haqq-icon{
+    width:24px !important;
+    height:24px !important;
+}
+
+html[data-haqq-platform="tiktok"] .haqq-btn-group{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:center !important;
+    gap:16px !important;
+}
+
+html[data-haqq-platform="tiktok"] .haqq-btn:hover{
+    background:rgba(22,24,35,.78) !important;
+}
+
+html[data-haqq-platform="tiktok"] .haqq-btn--done,
+html[data-haqq-platform="tiktok"] .haqq-btn--loading,
+html[data-haqq-platform="tiktok"] .haqq-btn--error{
+    width:48px !important;
+    height:48px !important;
+    min-width:48px !important;
+    border-radius:50% !important;
+}
+
+html[data-haqq-platform="tiktok"] .haqq-icon{
+    color: #fff !important;
+}
+
+html[data-haqq-platform="tiktok"] .haqq-spinner{
+    width:22px !important;
+    height:22px !important;
+    border-top-color:#fff !important;
+}
