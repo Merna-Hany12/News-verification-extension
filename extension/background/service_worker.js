@@ -1,15 +1,28 @@
-// ─── HAQQ Background Service Worker v11 ──────────────────────────────────────
-// v11 change: the old HAQQ_VERIFY_IMAGE / HAQQ_VERIFY_VIDEO handlers (which
-// only ever did a keyword-from-URL guess) are replaced with a single
-// HAQQ_DETECT_MEDIA handler that calls the real GPU-accelerated AI-media
-// detection pipeline for both images and video.
+// ─── HAQQ Background Service Worker v12 ──────────────────────────────────────
+// v12 change: added a single HAQQ_VERIFY_CONTENT handler that calls the new
+// backend endpoint /verify-content, which now owns the whole "verify text ->
+// maybe OCR -> maybe re-verify" decision server-side. This replaces what used
+// to be up to 3 separate chrome.runtime round trips (HAQQ_VERIFY_TEXT ->
+// HAQQ_OCR_IMAGE -> HAQQ_VERIFY_TEXT again) from content.js's old client-side
+// orchestration with a single request/response.
+//
+// HAQQ_VERIFY_TEXT and HAQQ_OCR_IMAGE are KEPT (not removed) since other
+// flows may still call them directly — only content.js's merged "content"
+// button flow has moved to HAQQ_VERIFY_CONTENT. Safe to delete the two old
+// handlers later once confirmed nothing else sends those message types.
+//
+// v11 change (carried over): the old HAQQ_VERIFY_IMAGE / HAQQ_VERIFY_VIDEO
+// handlers (which only ever did a keyword-from-URL guess) are replaced with
+// a single HAQQ_DETECT_MEDIA handler that calls the real GPU-accelerated
+// AI-media detection pipeline for both images and video.
 //
 // Responsibilities of this file:
 //   • routing chrome messages
-//   • calling /verify        (text — used by the merged "content" button)
-//   • calling /ocr           (image → text, feeds into /verify)
-//   • calling /classify      (direct AI news/non-news classification badge)
-//   • calling /detect-media  (GPU AI-generated / manipulated media detection)
+//   • calling /verify-content (merged text+OCR verification — "content" btn)
+//   • calling /verify         (text only — kept for any other caller)
+//   • calling /ocr            (image → text — kept for any other caller)
+//   • calling /classify       (direct AI news/non-news classification badge)
+//   • calling /detect-media   (GPU AI-generated / manipulated media detection)
 //   • stats tracking
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -33,6 +46,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     try {
       switch (msg.type) {
+        case "HAQQ_VERIFY_CONTENT":
+          return sendResponse({ data: await verifyContentBackend(msg.payload) });
+
         case "HAQQ_VERIFY_TEXT":
           return sendResponse({ data: await verifyText(msg.payload) });
 
@@ -66,11 +82,59 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true;
 });
 
-// ─── TEXT VERIFICATION ────────────────────────────────────────────────────────
+// ─── MERGED CONTENT VERIFICATION (text + OCR fallback, server-side) ──────────
+// Replaces what used to be up to 3 separate chrome.runtime round trips
+// (verify text -> ocr -> verify ocr text) with a single call to the
+// backend's /verify-content, which now owns that whole decision itself —
+// including firing OCR concurrently with text verification, and retrying
+// with OCR text when the direct-text verdict comes back "unverified" or
+// "non_news".
+async function verifyContentBackend({ text, imageUrl, lang }) {
+  const cKey = "content::" + (text || "").trim().slice(0, 100) + "::" + (imageUrl || "");
+  if (cache.has(cKey))    return cache.get(cKey);
+  if (inFlight.has(cKey)) return inFlight.get(cKey);
+
+  const promise = (async () => {
+    try {
+      const res = await fetch(`${NGROK_URL}/verify-content`, {
+        method:  "POST",
+        headers: {
+          "Content-Type":               "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify({
+          text:      (text || "").trim().slice(0, 1000),
+          image_url: imageUrl || null,
+          lang,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const out = await res.json();   // { verdict, confidence, explanation, sources, text_source }
+
+      cache.set(cKey, out);
+      inFlight.delete(cKey);
+      stats.total++;
+      stats[out.verdict] = (stats[out.verdict] || 0) + 1;
+      return out;
+
+    } catch (e) {
+      console.warn("[HAQQ] /verify-content error:", e.message);
+      inFlight.delete(cKey);
+      return result("unverified", 0, "⚠️ خطأ في الاتصال بخادم التحقق", []);
+    }
+  })();
+
+  inFlight.set(cKey, promise);
+  return promise;
+}
+
+// ─── TEXT VERIFICATION (text only, no OCR) ────────────────────────────────────
 // Delegates entirely to the LangGraph /verify pipeline on the backend.
 // Pipeline: classify → extract keywords → search → LLM verify → score
-// Called with either the post's direct caption text or its OCR-extracted
-// text — whichever the content script decided was the stronger signal.
+// Kept for any caller that wants text-only verification without the
+// merged OCR-fallback behavior /verify-content now provides.
 async function verifyText({ text, lang }) {
   if (!text || text.trim().length < 20)
     return result("unverified", 0, "النص قصير جداً للتحقق.", []);
@@ -158,10 +222,9 @@ async function detectMedia({ imageUrl, videoUrl }) {
   return promise;
 }
 
-// ─── OCR ──────────────────────────────────────────────────────────────────────
-// Sends image URL to /ocr, gets back extracted text. Called directly by the
-// content script's merged "content" flow, in parallel with reading the
-// post's own caption text — not chained after it.
+// ─── OCR (standalone, no verification) ────────────────────────────────────────
+// Sends image URL to /ocr, gets back extracted text. Kept for any caller
+// that wants raw OCR text without the merged verify-content flow.
 async function ocrImage({ imageUrl }) {
   if (!imageUrl) {
     console.warn("[HAQQ] ocrImage — no imageUrl provided");
