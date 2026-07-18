@@ -7,7 +7,7 @@ class HAQQState(TypedDict):
     lang:           str
 
     # set by classify_node
-    content_type:   Optional[str]   # "news" | "historical_scientific" | "non_news"
+    content_type:   Optional[str]   # "news" | "historical_scientific" | "medical" | "non_news"
     is_news:        Optional[bool]  # kept for backward compat with /classify endpoint
     news_score:     float
     non_news_score: float
