@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "HAQQ — حقّق",
-  "version": "3.0.0",
-  "description": "كاشف المحتوى المضلل على فيسبوك — Misinformation detector for Facebook",
+  "version": "3.1.0",
+  "description": "كاشف المحتوى المضلل على فيسبوك، إنستغرام وتيك توك — Misinformation & AI-media detector",
 
   "permissions": [
     "storage",
@@ -14,6 +14,8 @@
     "https://www.facebook.com/*",
     "https://web.facebook.com/*",
     "https://m.facebook.com/*",
+    "https://www.instagram.com/*",
+    "https://www.tiktok.com/*",
     "https://newsdata.io/*",
     "https://api.freenewsapi.io/*",
     "https://*.ngrok-free.dev/*",
@@ -35,7 +37,9 @@
       "matches": [
         "https://www.facebook.com/*",
         "https://web.facebook.com/*",
-        "https://m.facebook.com/*"
+        "https://m.facebook.com/*",
+        "https://www.instagram.com/*",
+        "https://www.tiktok.com/*"
       ],
       "js":  ["content/content.js"],
       "css": ["content/content.css"],
@@ -56,7 +60,9 @@
       "resources": ["icons/*"],
       "matches": [
         "https://www.facebook.com/*",
-        "https://web.facebook.com/*"
+        "https://web.facebook.com/*",
+        "https://www.instagram.com/*",
+        "https://www.tiktok.com/*"
       ]
     }
   ]

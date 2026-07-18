@@ -1,11 +1,56 @@
-/* ─── HAQQ Extension v5 ─────────────────────────────────── */
-/* v5 change: added box-sizing/min-width/max-width sizing fixes so the
-   toolbar and verdict badge no longer get clipped on narrower screens.
-   Root cause was `.haqq-badge { overflow: hidden }` combined with no
-   box-sizing (padding added on top of width instead of inside it) and
-   flex children refusing to shrink below their content's natural width. */
+/* ─── HAQQ Extension v11 ────────────────────────────────── */
+/* v11 change (requested from a live screenshot): the verdict badge is
+   now full post-width instead of a small max-content box capped at
+   340px — `.haqq-badge` dropped its `min-width: 260px` /
+   `max-width: min(100%, 340px)` in favor of `width: 100%`, so it spans
+   the same width as the post card around it.
 
-/* ── Global sizing fixes — prevents cropping on narrow screens ── */
+   Also added a Facebook-specific LIGHT theme for the badge — the
+   original dark styling (#1a1a1a background, light-gray/white text)
+   was tuned for Instagram/TikTok's own dark pages, but on Facebook's
+   light UI it floated a dark card on a white page. New
+   `[data-haqq-platform="facebook"]` rules override background, text,
+   pill, source-link, and dismiss colors to Facebook's own light
+   palette (white background, #050505/#65676b text, #1877f2 links) —
+   scoped so Instagram/TikTok keep the dark styling. */
+
+/* ─── HAQQ Extension v10 ────────────────────────────────── */
+/* v10 change: TikTok now gets its own button styling — bigger tap
+   target (40px vs 32px) and a translucent dark circular backdrop
+   matching TikTok's own icon style (its heart/comment/share icons sit
+   on that kind of backdrop for contrast against video), instead of the
+   plain transparent circle Facebook/Instagram use. Targeted via
+   `[data-haqq-platform="tiktok"]` on <html>, which content.js (v12) now
+   sets. Facebook/Instagram are unchanged — nothing about the request
+   asked to alter their sizing/background, and their toolbar placement
+   (inside the row with Like/Comment/Share) was already correct from
+   v9.2, so no insertion-logic changes were needed either. */
+
+/* ─── HAQQ Extension v9 ─────────────────────────────────── */
+/* v9 change: content.js (v11) switched buttons back to icon-only —
+   shield-check for content verification, robot for AI-media detection
+   — after v8's full text-label pills. This undoes v8's button-specific
+   rules and restores v7's icon-only sizing, with one addition: since
+   the icons are self-contained SVG (not emoji), `.haqq-icon` gets an
+   explicit size rule so content.css can resize them without touching
+   content.js, and buttons stay transparent (no colored pill) since a
+   bare glyph — like a platform's own like/comment/share icons — reads
+   fine without a background tint.
+
+   Specifically reverted from v8:
+     • Fixed 32px circular tap target instead of auto-width text pills.
+     • Transparent background instead of colored pills per type.
+     • No loading text — spinner-only again (content.js no longer
+       renders "جارٍ التحقق…", so `.haqq-btn-loading-txt` has nothing
+       to show/hide either way, but the rule is removed rather than
+       left dangling).
+
+   NOT reverted: `.haqq-toolbar { display: contents }` (still needed —
+   content.js still inserts the toolbar into the platform's own
+   Like/Comment/Share row) and the dark-surface verdict-badge styling,
+   both unrelated to button style. */
+
+/* ── Global sizing fixes (from v5/v6) ── */
 .haqq-toolbar,
 .haqq-badge,
 .haqq-badge-bar,
@@ -21,150 +66,178 @@
   min-width: 0 !important;
 }
 
-/* ── Toolbar ── */
-.haqq-toolbar {
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-  padding: 10px 16px 8px !important;
-  background: linear-gradient(180deg, #f7f8fa 0%, #eef0f3 100%) !important;
-  border-top: 1px solid #e4e6ea !important;
-  flex-wrap: wrap !important;
+.haqq-badge {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
 }
 
+/* ── Toolbar — still inserts as a sibling inside the platform's own
+   icon row (content.js's insertToolbar). display:contents means the
+   toolbar wrapper itself takes up no layout space of its own — its
+   children (the button(s)) sit directly as flex items in that row. ── */
+.haqq-toolbar {
+  display: contents !important;
+}
+
+/* Toolbar-wide label ("🔍 حقّق") stays hidden — icon-only buttons have
+   no room for a header label either. Toggle this back on if you want
+   it visible above/beside the buttons instead. */
 .haqq-toolbar-lbl {
-  font-size: 12.5px !important;
-  font-weight: 800 !important;
-  color: #4a4d52 !important;
-  font-family: 'Segoe UI', Arial, sans-serif !important;
-  white-space: nowrap !important;
-  letter-spacing: 0.3px !important;
+  display: none !important;
 }
 
 .haqq-btn-group {
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  flex-wrap: wrap !important;
+  display: contents !important;
 }
 
-/* ── Buttons ── */
+/* ── Buttons — icon-only again, transparent, sized to match a
+   platform's own action icons (~18px glyph in a ~32px tap target, same
+   proportions Instagram/TikTok use for heart/comment/share). ── */
 .haqq-btn {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 6px !important;
-  padding: 7px 14px !important;
-  border-radius: 18px !important;
-  border: 1.5px solid transparent !important;
-  font-size: 12.5px !important;
-  font-weight: 700 !important;
-  font-family: 'Segoe UI', Arial, sans-serif !important;
-  cursor: pointer !important;
-  transition: transform 0.12s ease, box-shadow 0.15s ease, background 0.15s ease !important;
-  white-space: nowrap !important;
-  line-height: 1.4 !important;
-  user-select: none !important;
-  outline: none !important;
-  text-decoration: none !important;
-  margin: 0 !important;
-  min-width: 64px !important;
   justify-content: center !important;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
-  box-sizing: border-box !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  border: none !important;
+  background: transparent !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  transition: background 0.12s ease, transform 0.1s ease !important;
+  box-shadow: none !important;
+  margin: 0 !important;
 }
 .haqq-btn:hover:not(:disabled) {
-  transform: translateY(-1px) !important;
-  box-shadow: 0 3px 8px rgba(0,0,0,0.10) !important;
+  background: rgba(127, 127, 127, 0.14) !important;
+  transform: scale(1.05) !important;
 }
 .haqq-btn:active:not(:disabled) {
-  transform: translateY(0) !important;
+  transform: scale(0.95) !important;
 }
 
-/* Merged content button (text + image) — blue/purple gradient */
-.haqq-btn--content {
-  background: linear-gradient(135deg, #e7f0fd 0%, #eee5ff 100%) !important;
-  border-color: #4f7fe0 !important;
-  color: #2c4bb0 !important;
-}
-.haqq-btn--content:hover:not(:disabled) {
-  background: linear-gradient(135deg, #d9e8ff 0%, #e3d5ff 100%) !important;
+/* Icon sizing — matches the width/height already set inline in
+   content.js's SVG markup; kept here too so it can be resized from CSS
+   alone without touching JS. */
+.haqq-icon {
+  width: 18px !important;
+  height: 18px !important;
 }
 
-/* AI media detection button — warm orange/pink gradient, distinct energy */
+/* Bare icon, no colored pill — reads fine directly against a platform's
+   own background, same as their native like/comment/share icons. */
+.haqq-btn--content,
 .haqq-btn--aimedia {
-  background: linear-gradient(135deg, #fff1e6 0%, #ffe3ef 100%) !important;
-  border-color: #f0630a !important;
-  color: #c1450a !important;
+  background: transparent !important;
+  border: none !important;
 }
+.haqq-btn--content:hover:not(:disabled),
 .haqq-btn--aimedia:hover:not(:disabled) {
-  background: linear-gradient(135deg, #ffe4cc 0%, #ffd0e2 100%) !important;
+  background: rgba(127, 127, 127, 0.14) !important;
 }
 
 /* States */
 .haqq-btn--loading {
-  opacity: 0.85 !important;
+  opacity: 0.6 !important;
   cursor: wait !important;
-  box-shadow: none !important;
-}
-.haqq-btn-loading-txt {
-  font-size: 11.5px !important;
 }
 .haqq-btn--error {
-  background: #fce8e6 !important;
-  border-color: #ea4335 !important;
-  color: #c5221f !important;
+  background: rgba(234, 67, 53, 0.18) !important;
 }
 .haqq-btn--done {
-  min-width: 34px !important;
-  padding: 6px 10px !important;
-  font-size: 15px !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  padding: 0 !important;
 }
 .haqq-btn:disabled {
   cursor: default !important;
 }
 
-/* ── Spinner ── */
+/* ── Spinner — sized to sit inside the 32px icon button ── */
 .haqq-spinner {
   display: inline-block !important;
-  width: 11px !important;
-  height: 11px !important;
-  border: 2px solid rgba(0,0,0,0.15) !important;
-  border-top-color: currentColor !important;
+  width: 15px !important;
+  height: 15px !important;
+  border: 2px solid rgba(127, 127, 127, 0.3) !important;
+  border-top-color: var(--haqq-icon-color, #65676b) !important;
   border-radius: 50% !important;
   animation: haqq-spin 0.6s linear infinite !important;
   flex-shrink: 0 !important;
 }
 @keyframes haqq-spin { to { transform: rotate(360deg); } }
 
-/* ── Verdict Badge ── */
+/* ── TikTok override (v10) ───────────────────────────────────
+   Facebook/Instagram keep the plain transparent 32px circle above.
+   TikTok's own action icons (heart/comment/share) are bigger and sit on
+   a translucent dark circular backdrop for contrast against video —
+   this matches that, sized up and given the same kind of backdrop
+   instead of staying bare/transparent. Targeted via the
+   `data-haqq-platform="tiktok"` attribute content.js sets on <html>. */
+html[data-haqq-platform="tiktok"] .haqq-btn {
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  background: rgba(22, 24, 35, 0.34) !important;
+}
+html[data-haqq-platform="tiktok"] .haqq-btn:hover:not(:disabled) {
+  background: rgba(22, 24, 35, 0.5) !important;
+}
+html[data-haqq-platform="tiktok"] .haqq-btn--content,
+html[data-haqq-platform="tiktok"] .haqq-btn--aimedia {
+  background: rgba(22, 24, 35, 0.34) !important;
+}
+html[data-haqq-platform="tiktok"] .haqq-btn--content:hover:not(:disabled),
+html[data-haqq-platform="tiktok"] .haqq-btn--aimedia:hover:not(:disabled) {
+  background: rgba(22, 24, 35, 0.5) !important;
+}
+html[data-haqq-platform="tiktok"] .haqq-btn--done,
+html[data-haqq-platform="tiktok"] .haqq-btn--error {
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+}
+html[data-haqq-platform="tiktok"] .haqq-icon {
+  width: 22px !important;
+  height: 22px !important;
+}
+html[data-haqq-platform="tiktok"] .haqq-spinner {
+  width: 17px !important;
+  height: 17px !important;
+  border-top-color: #fff !important;
+}
+
+/* ── Verdict Badge — unchanged from v7's dark-surface styling; nothing
+   about reverting the buttons requires reverting this. ── */
 .haqq-badge {
   position: relative !important;
-  margin: 8px 12px 4px !important;
+  margin: 8px 0 4px !important;
   border-radius: 12px !important;
-  border: 1.5px solid transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: #1a1a1a !important;
   font-family: 'Segoe UI', Arial, sans-serif !important;
   direction: rtl !important;
   animation: haqq-in 0.22s cubic-bezier(0.2, 0.8, 0.3, 1) !important;
-  /* was: overflow: hidden — that silently clipped content on narrow
-     screens instead of letting it wrap. Rounded corners still work fine
-     with visible since children respect the border-radius padding. */
   overflow: visible !important;
   z-index: 10 !important;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.06) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
 }
 @keyframes haqq-in {
   from { opacity: 0; transform: translateY(-6px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* Badge color variants */
+/* Badge color variants — dark fill + colored left accent border. */
 .haqq-badge--fact,
-.haqq-badge--verified   { background: #eaf7ee !important; border-color: #34a853 !important; }
-.haqq-badge--unverified { background: #fff9e6 !important; border-color: #f9ab00 !important; }
-.haqq-badge--fake       { background: #fdeceb !important; border-color: #ea4335 !important; }
-.haqq-badge--ai         { background: #eaf1fe !important; border-color: #4285f4 !important; }
-.haqq-badge--manipulated{ background: #fdf0e6 !important; border-color: #f0630a !important; }
-.haqq-badge--nonnews    { background: #f1f3f4 !important; border-color: #9aa0a6 !important; }
+.haqq-badge--verified   { border-inline-start: 3px solid #34a853 !important; }
+.haqq-badge--unverified { border-inline-start: 3px solid #f9ab00 !important; }
+.haqq-badge--fake       { border-inline-start: 3px solid #ea4335 !important; }
+.haqq-badge--ai         { border-inline-start: 3px solid #4285f4 !important; }
+.haqq-badge--manipulated{ border-inline-start: 3px solid #f0630a !important; }
+.haqq-badge--nonnews    { border-inline-start: 3px solid #8e8e8e !important; }
 
 /* Badge bar (top row) */
 .haqq-badge-bar {
@@ -184,10 +257,10 @@
 .haqq-badge-typename {
   font-size: 10px !important;
   font-weight: 800 !important;
-  background: rgba(0,0,0,0.08) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
   padding: 3px 8px !important;
   border-radius: 10px !important;
-  color: #333 !important;
+  color: #e0e0e0 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.5px !important;
   white-space: nowrap !important;
@@ -196,7 +269,7 @@
 .haqq-badge-verdict {
   font-size: 14.5px !important;
   font-weight: 800 !important;
-  color: #111 !important;
+  color: #f5f5f5 !important;
   flex: 1 !important;
   overflow-wrap: break-word !important;
   word-break: break-word !important;
@@ -214,17 +287,17 @@
 .haqq-pct {
   font-size: 11px !important;
   font-weight: 800 !important;
-  background: rgba(0,0,0,0.09) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
   padding: 3px 9px !important;
   border-radius: 10px !important;
-  color: #444 !important;
+  color: #ddd !important;
   white-space: nowrap !important;
 }
 
 .haqq-mock {
   font-size: 10px !important;
   background: #ff9800 !important;
-  color: #fff !important;
+  color: #000 !important;
   padding: 1px 6px !important;
   border-radius: 8px !important;
   font-weight: 700 !important;
@@ -234,7 +307,7 @@
 /* Badge explanation */
 .haqq-badge-expl {
   font-size: 13px !important;
-  color: #333 !important;
+  color: #ccc !important;
   line-height: 1.6 !important;
   margin: 0 12px 9px !important;
   padding: 0 !important;
@@ -244,7 +317,7 @@
 
 /* Sources section */
 .haqq-sources {
-  border-top: 1px solid rgba(0,0,0,0.08) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
   padding: 8px 12px 10px !important;
   display: flex !important;
   flex-direction: column !important;
@@ -256,7 +329,7 @@
 .haqq-src-lbl {
   font-size: 11px !important;
   font-weight: 800 !important;
-  color: #666 !important;
+  color: #999 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.4px !important;
 }
@@ -271,19 +344,19 @@
 .haqq-src-link {
   display: block !important;
   padding: 6px 10px !important;
-  background: rgba(255,255,255,0.7) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
   border-radius: 8px !important;
   text-decoration: none !important;
   transition: background 0.12s !important;
-  border: 1px solid rgba(0,0,0,0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
 .haqq-src-link:hover {
-  background: rgba(255,255,255,0.95) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
 }
 
 .haqq-src-title {
   font-size: 12px !important;
-  color: #1877f2 !important;
+  color: #6db3ff !important;
   font-weight: 600 !important;
   text-decoration: underline !important;
   display: block !important;
@@ -299,7 +372,7 @@
   border: none !important;
   cursor: pointer !important;
   font-size: 13px !important;
-  color: #888 !important;
+  color: #999 !important;
   padding: 3px 6px !important;
   border-radius: 6px !important;
   line-height: 1 !important;
@@ -308,6 +381,121 @@
   flex-shrink: 0 !important;
 }
 .haqq-dismiss:hover {
-  background: rgba(0,0,0,0.08) !important;
-  color: #333 !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+
+/* ── Facebook light-theme override (v11) ─────────────────────
+   The badge above is styled dark (#1a1a1a, white/light-gray text) to
+   match Instagram/TikTok's own dark pages. Facebook's UI is light, so
+   that same badge floated a dark card on a white page — this overrides
+   it back to a light card (white background, light-gray border, dark
+   text) using Facebook's own palette, scoped via
+   `data-haqq-platform="facebook"` so Instagram/TikTok are untouched. */
+html[data-haqq-platform="facebook"] .haqq-badge {
+  background: #ffffff !important;
+  border: 1px solid #dadde1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
+}
+
+html[data-haqq-platform="facebook"] .haqq-badge-typename {
+  background: #f0f2f5 !important;
+  color: #65676b !important;
+}
+
+html[data-haqq-platform="facebook"] .haqq-badge-verdict {
+  color: #050505 !important;
+}
+
+html[data-haqq-platform="facebook"] .haqq-pct {
+  background: #f0f2f5 !important;
+  color: #65676b !important;
+}
+
+html[data-haqq-platform="facebook"] .haqq-badge-expl {
+  color: #65676b !important;
+}
+
+html[data-haqq-platform="facebook"] .haqq-sources {
+  border-top: 1px solid #e4e6eb !important;
+}
+
+html[data-haqq-platform="facebook"] .haqq-src-lbl {
+  color: #8a8d91 !important;
+}
+
+html[data-haqq-platform="facebook"] .haqq-src-link {
+  background: #f0f2f5 !important;
+  border: 1px solid #e4e6eb !important;
+}
+html[data-haqq-platform="facebook"] .haqq-src-link:hover {
+  background: #e4e6eb !important;
+}
+
+html[data-haqq-platform="facebook"] .haqq-src-title {
+  color: #1877f2 !important;
+}
+
+html[data-haqq-platform="facebook"] .haqq-dismiss {
+  color: #8a8d91 !important;
+}
+html[data-haqq-platform="facebook"] .haqq-dismiss:hover {
+  background: #f0f2f5 !important;
+  color: #050505 !important;
+}
+/* ── Verdict-colored badge backgrounds (not just the border accent) ──
+   Facebook (light): pastel tint matching the original v4 palette.
+   Instagram/TikTok (dark): a translucent color wash layered over the
+   dark base, so it stays legible on a black page instead of using a
+   light pastel that would look washed out there. */
+
+/* Facebook — light theme */
+html[data-haqq-platform="facebook"] .haqq-badge--fact,
+html[data-haqq-platform="facebook"] .haqq-badge--verified {
+  background: #eaf7ee !important;
+  border-color: #34a853 !important;
+}
+html[data-haqq-platform="facebook"] .haqq-badge--unverified {
+  background: #fff8e1 !important;
+  border-color: #f9ab00 !important;
+}
+html[data-haqq-platform="facebook"] .haqq-badge--fake {
+  background: #fdeceb !important;
+  border-color: #ea4335 !important;
+}
+html[data-haqq-platform="facebook"] .haqq-badge--ai {
+  background: #eaf1fe !important;
+  border-color: #4285f4 !important;
+}
+html[data-haqq-platform="facebook"] .haqq-badge--manipulated {
+  background: #fdf0e6 !important;
+  border-color: #f0630a !important;
+}
+html[data-haqq-platform="facebook"] .haqq-badge--nonnews {
+  background: #f1f3f4 !important;
+  border-color: #9aa0a6 !important;
+}
+
+/* Instagram/TikTok — dark theme, translucent color wash over #1a1a1a */
+html[data-haqq-platform="instagram"] .haqq-badge--fact,
+html[data-haqq-platform="instagram"] .haqq-badge--verified,
+html[data-haqq-platform="tiktok"] .haqq-badge--fact,
+html[data-haqq-platform="tiktok"] .haqq-badge--verified {
+  background: linear-gradient(rgba(52,168,83,0.14), rgba(52,168,83,0.14)), #1a1a1a !important;
+}
+html[data-haqq-platform="instagram"] .haqq-badge--unverified,
+html[data-haqq-platform="tiktok"] .haqq-badge--unverified {
+  background: linear-gradient(rgba(249,171,0,0.14), rgba(249,171,0,0.14)), #1a1a1a !important;
+}
+html[data-haqq-platform="instagram"] .haqq-badge--fake,
+html[data-haqq-platform="tiktok"] .haqq-badge--fake {
+  background: linear-gradient(rgba(234,67,53,0.14), rgba(234,67,53,0.14)), #1a1a1a !important;
+}
+html[data-haqq-platform="instagram"] .haqq-badge--ai,
+html[data-haqq-platform="tiktok"] .haqq-badge--ai {
+  background: linear-gradient(rgba(66,133,244,0.14), rgba(66,133,244,0.14)), #1a1a1a !important;
+}
+html[data-haqq-platform="instagram"] .haqq-badge--manipulated,
+html[data-haqq-platform="tiktok"] .haqq-badge--manipulated {
+  background: linear-gradient(rgba(240,99,10,0.14), rgba(240,99,10,0.14)), #1a1a1a !important;
 }
