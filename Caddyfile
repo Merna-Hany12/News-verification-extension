@@ -1,7 +1,0 @@
-# Replace YOUR_DOMAIN with your actual domain or use the EC2 public IP
-# If using IP only (no domain), replace this entire file content with:
-#   :80 { reverse_proxy haqq-backend:8000 }
-
-YOUR_DOMAIN {
-    reverse_proxy haqq-backend:8000
-}

@@ -26,13 +26,8 @@ extension
 # Lock file (not needed at runtime)
 backend/uv.lock
 
-# Docker files themselves
-Dockerfile
-Dockerfile.cpu
+# Docker / Compose configurations
 docker-compose.yml
-docker-compose.cpu.yml
-Caddyfile
-setup.sh
 
 # Misc
 *.mp4
