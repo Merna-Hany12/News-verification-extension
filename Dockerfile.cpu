@@ -7,12 +7,11 @@ WORKDIR /build
 
 COPY backend/requirements.deploy.txt ./requirements.txt
 
-# Install CPU-only PyTorch first (skips the ~2 GB CUDA bundle),
-# then the rest of the requirements.
-# --no-deps on torch prevents it from pulling torchvision/torchaudio.
+# Install CPU-only PyTorch + torchvision first (skips the ~2 GB CUDA bundle).
+# Both must come from the same CPU index to avoid version mismatches.
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir --no-deps \
-        torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir \
+        torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
 # ═══════════════════════════════════════════════════════════════════════════════
