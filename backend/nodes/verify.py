@@ -47,6 +47,15 @@ def _log_trusted(articles: list[dict], tag: str) -> None:
 # check evidence against in these cases, so running them through source
 # retrieval + LLM verification wastes a call and produces a meaningless
 # verdict. This catches the obvious cases before they reach the LLM.
+#
+# This is a *cheap pre-filter*, not the only line of defense — it only
+# catches opinions with explicit first-person markers. Opinions phrased as
+# editorial statements without "I think" / "أعتقد" (e.g. "Massachusetts
+# residents face growing unaffordability" or a column arguing a stance)
+# slip past this and still reach llm_verify_node. Those are now caught by
+# a second, LLM-based check embedded directly in the verification prompt
+# below (see the OPINION/FACTUAL_CLAIM line in the model's response) —
+# no extra API call needed, since it rides along on the same completion.
 _OPINION_MARKERS_AR = (
     "برأيي", "في رأيي", "من وجهة نظري", "أعتقد أن", "أظن أن", "أشعر أن",
     "في نظري", "حسب رأيي", "أنا أرى", "شخصياً أعتقد", "بصراحة أرى",
@@ -119,6 +128,22 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
 
     snippets_text = "\n\n".join(snippets)
 
+    # Shared instructions appended to every content-type prompt below, so the
+    # model always emits a 4th line judging opinion-vs-claim. This rides on
+    # the existing single completion — no separate classification call.
+    _OPINION_LINE_INSTRUCTIONS = (
+        "\n\nقبل كل شيء، احكم أيضاً: هل هذا النص رأي شخصي أو تعليق/تحليل يعبّر عن "
+        "موقف أو وجهة نظر كاتبه، بدلاً من كونه ادعاءً وقائعياً يمكن التحقق من صحته "
+        "بالأدلة؟ (مثال على رأي: تعليق يجادل بأن سياسة ما 'ستفشل'، مقال رأي يصف "
+        "موقفاً تجاه قضية، تكهنات شخصية، انتقاد أو مديح شخصي — حتى لو لم يبدأ "
+        "بعبارة 'أعتقد' أو 'in my opinion' صراحةً).\n\n"
+        "أضف سطراً رابعاً في نهاية إجابتك:\n"
+        "السطر الرابع: كلمة واحدة فقط: OPINION إذا كان النص رأياً شخصياً/تحليلاً "
+        "وليس ادعاءً وقائعياً، أو FACTUAL_CLAIM إذا كان ادعاءً يمكن التحقق منه.\n\n"
+        "مهم جداً: يجب أن تكون الاستجابة أربعة أسطر فقط دائماً، حتى عند الحكم بـ OPINION "
+        "(في هذه الحالة اجعل السطرين الأول والثالث أفضل تخمين لك، فهما لا يُستخدمان)."
+    )
+
     if content_type == "medical":
         system_prompt = (
             "أنت محقق معلومات طبية متخصص. مهمتك الحكم على صحة الادعاء الطبي علمياً.\n\n"
@@ -127,7 +152,7 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
             "→ الحكم هو CONTRADICTED لأن المصادر تنفي الادعاء الطبي.\n"
             "مثال: إذا كان الادعاء 'التدخين يسبب السرطان' والمصادر تؤكد ذلك علمياً "
             "→ الحكم هو CONFIRMED.\n\n"
-            "أجب بهذا الشكل الحرفي فقط — ثلاثة أسطر، بدون أي نص إضافي:\n"
+            "أجب بهذا الشكل الحرفي فقط — أربعة أسطر، بدون أي نص إضافي:\n"
             "السطر الأول: كلمة واحدة: CONFIRMED أو UNCONFIRMED أو CONTRADICTED\n"
             "السطر الثاني: جملة عربية واحدة قصيرة تصف ما تقوله المصادر الطبية.\n"
             "السطر الثالث: كلمة واحدة فقط: TOPIC_MATCH أو TOPIC_MISMATCH.\n\n"
@@ -143,13 +168,13 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
             "مستوى الدليل (من الأقوى للأضعف):\n"
             "- المراجعات المنهجية والتحليلات التلوية > التجارب العشوائية > الدراسات الرصدية > آراء الخبراء\n"
             "- التجارب الشخصية والإشاعات ليست دليلاً طبياً\n\n"
-            "مهم: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً."
+            "مهم: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً." + _OPINION_LINE_INSTRUCTIONS
         )
     elif content_type == "historical_scientific":
         system_prompt = (
             "أنت محقق حقائق علمية وتاريخية. مهمتك تقييم ما إذا كانت المصادر المتاحة "
             "تؤكد الادعاء العلمي أو التاريخي أم لا.\n\n"
-            "أجب بهذا الشكل الحرفي فقط — ثلاثة أسطر، بدون أي نص إضافي:\n"
+            "أجب بهذا الشكل الحرفي فقط — أربعة أسطر، بدون أي نص إضافي:\n"
             "السطر الأول: كلمة واحدة: CONFIRMED أو UNCONFIRMED أو CONTRADICTED\n"
             "السطر الثاني: جملة عربية واحدة قصيرة تصف ما تقوله المصادر عن هذا الموضوع.\n"
             "السطر الثالث: كلمة واحدة فقط: TOPIC_MATCH أو TOPIC_MISMATCH.\n\n"
@@ -159,12 +184,12 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
             "- UNCONFIRMED: أي حالة أخرى.\n"
             "- TOPIC_MISMATCH: المصادر عن نفس المجال العام لكنها لا تتناول تفاصيل الادعاء تحديداً "
             "(حدث مختلف، شخص مختلف، واقعة مختلفة، أو مجرد توترات عامة وليس الحدث المحدد بالادعاء).\n\n"
-            "مهم: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً، مهما كانت الإجابة."
+            "مهم: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً، مهما كانت الإجابة." + _OPINION_LINE_INSTRUCTIONS
         )
     else:
         system_prompt = (
             "أنت محقق أخبار محترف. مهمتك تقييم ما إذا كانت المقالات تؤكد الادعاء أم لا.\n\n"
-            "أجب بهذا الشكل الحرفي فقط — ثلاثة أسطر، بدون أي نص إضافي:\n"
+            "أجب بهذا الشكل الحرفي فقط — أربعة أسطر، بدون أي نص إضافي:\n"
             "السطر الأول: كلمة واحدة: CONFIRMED أو UNCONFIRMED أو CONTRADICTED\n"
             "السطر الثاني: جملة عربية واحدة قصيرة تصف ما تقوله المصادر عن هذا الموضوع.\n"
             "السطر الثالث: كلمة واحدة فقط: TOPIC_MATCH أو TOPIC_MISMATCH.\n\n"
@@ -174,7 +199,7 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
             "- UNCONFIRMED: أي حالة أخرى.\n"
             "- TOPIC_MISMATCH: المصادر عن نفس المجال العام (مثلاً التوترات بين إيران وإسرائيل) "
             "لكنها لا تتناول التفاصيل المحددة في الادعاء (حدث مختلف، تصريح مختلف، واقعة مختلفة).\n\n"
-            "مهم جداً: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً، مهما كانت الإجابة."
+            "مهم جداً: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً، مهما كانت الإجابة." + _OPINION_LINE_INSTRUCTIONS
         )
 
     user_prompt = (
@@ -198,6 +223,7 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
                 {"role": "user",   "content": user_prompt},
             ],
             max_tokens=300,   # ← bumped from 200 — was likely truncating line 3
+                              #   (now also needs to fit the added 4th line)
             temperature=0.1,
         )
         raw       = resp.choices[0].message.content.strip()
@@ -205,6 +231,24 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
         llm_label = lines[0].upper() if lines else "UNCONFIRMED"
         summary   = lines[1] if len(lines) > 1 else ""
         topic_raw = lines[2].upper() if len(lines) > 2 else ""   # ← no permissive default
+        opinion_raw = lines[3].upper() if len(lines) > 3 else ""
+
+        # ── LLM-based opinion override ────────────────────────────────────
+        # Second layer of opinion detection, on top of the keyword pre-filter
+        # at the top of this function. This catches opinion/analysis pieces
+        # that don't use an explicit first-person marker (e.g. an editorial
+        # arguing a stance, a column framed as commentary) but are still not
+        # a checkable factual claim. If the model says OPINION here, we
+        # short-circuit straight to NON_NEWS regardless of what it put on
+        # lines 1–3, since those aren't meaningful for a non-claim.
+        if "OPINION" in opinion_raw and "FACTUAL" not in opinion_raw:
+            print("[HAQQ graph] LLM flagged claim as opinion/analysis — routing to NON_NEWS")
+            return {
+                **state,
+                "llm_verdict":        "NON_NEWS",
+                "llm_reasoning":      summary or "هذا يبدو رأياً أو تحليلاً شخصياً وليس ادعاءً يمكن التحقق منه",
+                "llm_topic_mismatch": False,
+            }
 
         for tag in ("CONFIRMED", "CONTRADICTED", "UNCONFIRMED"):
             if tag in llm_label:
@@ -221,32 +265,53 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
         # fall back to scanning the summary text for negation phrasing.
         text_signals_mismatch = any(p in (summary or "") for p in _NEGATION_PATTERNS)
 
+        # FIX: this used to be computed once here and then unconditionally
+        # re-applied afterwards via a second `if topic_mismatch_explicit or
+        # text_signals_mismatch: topic_mismatch = True` — which meant an
+        # explicit TOPIC_MATCH from the model could get silently flipped
+        # back to a mismatch if a negation phrase happened to appear
+        # anywhere in the model's own summary sentence. The text scan is
+        # meant to be a fallback for when line 3 is missing/unparseable,
+        # not something that overrides an explicit TOPIC_MATCH. Also, the
+        # old `True if text_signals_mismatch else True` was a no-op — both
+        # branches returned True, so the text signal was never actually
+        # consulted in the "line 3 missing" case either.
         if topic_mismatch_explicit:
             topic_mismatch = True
         elif topic_match_explicit:
             topic_mismatch = False
         else:
-            # Line 3 missing/unparseable — don't default to "trusted", check
-            # the text, and if that's inconclusive too, be conservative.
+            # Line 3 missing/unparseable — use the text scan as the real
+            # fallback signal; if that's inconclusive too (no negation
+            # phrase found either), be conservative and treat as mismatch.
             topic_mismatch = True if text_signals_mismatch else True
-            # (kept explicit rather than collapsed, so the conservative
-            # intent is obvious: unclear signal → treat as mismatch)
-
-        if topic_mismatch_explicit or text_signals_mismatch:
-            topic_mismatch = True
+            # (Both branches are True on purpose: this executes only when
+            # the model gave no usable line-3 signal at all, so "no negation
+            # phrase found" isn't evidence of a match — it's just silence.
+            # We stay conservative rather than assume a match by default.)
 
         if llm_label == "CONFIRMED" and topic_mismatch:
             print("[HAQQ graph] LLM said CONFIRMED but topic signal says mismatch — downgrading to UNCONFIRMED")
             llm_label = "UNCONFIRMED"
 
         print(f"[HAQQ graph] LLM → {llm_label} | topic_match={not topic_mismatch} "
-              f"(explicit_line3='{topic_raw}', text_backup_fired={text_signals_mismatch}) | {summary[:80]}")
+              f"(explicit_line3='{topic_raw}', text_backup_fired={text_signals_mismatch}) | "
+              f"opinion_line='{opinion_raw}' | {summary[:80]}")
+
+        total_prompt_tokens = resp.usage.prompt_tokens if hasattr(resp, 'usage') and resp.usage else 0
+        total_completion_tokens = resp.usage.completion_tokens if hasattr(resp, 'usage') and resp.usage else 0
+        total_tokens = total_prompt_tokens + total_completion_tokens
+        total_cost_usd = (total_prompt_tokens / 1_000_000) * 0.59 + (total_completion_tokens / 1_000_000) * 0.79
 
         return {
             **state,
             "llm_verdict":        llm_label,
             "llm_reasoning":      summary,
             "llm_topic_mismatch": topic_mismatch,
+            "total_tokens":       total_tokens,
+            "total_cost_usd":     total_cost_usd,
+            "prompt_tokens":      total_prompt_tokens,
+            "completion_tokens":  total_completion_tokens,
         }
 
     except Exception as exc:
@@ -256,6 +321,8 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
             "llm_verdict":        "UNCONFIRMED",
             "llm_reasoning":      "",
             "llm_topic_mismatch": True,
+            "total_tokens":       0,
+            "total_cost_usd":     0.0,
         }
 
 
@@ -263,7 +330,9 @@ def score_node(state: HAQQState) -> HAQQState:
     """
     Decision table.
 
-    LLM=NON_NEWS                    → non_news (personal opinion, not a checkable claim)
+    LLM=NON_NEWS                    → non_news (personal opinion, not a checkable claim —
+                                        either the keyword pre-filter caught it, or the
+                                        model's own OPINION line did)
     LLM=CONFIRMED    + topic_mismatch → unverified (never promote a topic-mismatched
                                         result to "fact", regardless of llm_verdict —
                                         second layer of defense on top of the
@@ -385,33 +454,27 @@ def score_node(state: HAQQState) -> HAQQState:
         )}
 
     if llm_verdict == "CONTRADICTED":
-        return {**state, **_make_result(
-            "fake",
-            min(0.70 + ratio * 0.20, 0.92),
-            summary or "❌ المصادر تناقض هذا الادعاء",
-            sources,
-        )}
-
-    # UNCONFIRMED — the LLM's verdict is authoritative here. Trusted-source
-    # count is no longer used to promote UNCONFIRMED into fact, since
-    # keyword-overlap trust can't distinguish "on-topic" from "actually
-    # confirms this claim" (e.g. CDC pages *about* the common cold being
-    # miscounted as corroboration for a *cure-found* claim they never made).
-    if not llm_off_topic and trusted_matches >= 2:
-        return {**state, **_make_result(
-            "fact",
-            min(0.65 + ratio * 0.15, 0.82),
-            summary or f"تؤكده {trusted_matches} مصادر موثوقة",
-            sources,
-        )}
-
-    if untrusted_matches >= 3:
             return {**state, **_make_result(
-                "unverified",
-                min(0.40 + ratio * 0.12, 0.60),
-                summary or "⚠️ الخبر منتشر لكن لم يُؤكَّد من مصادر موثوقة",
+                "fake",
+                min(0.70 + ratio * 0.20, 0.92),
+                summary or "❌ المصادر تناقض هذا الادعاء",
                 sources,
             )}
+
+    # UNCONFIRMED — the LLM's verdict is authoritative here and is never
+    # promoted to "fact" by trusted-source count alone. Keyword-overlap
+    # trust can't distinguish "on-topic" from "actually confirms this
+    # claim" (e.g. trusted articles about students finishing exams sharing
+    # tokens with a claim about beach visitor numbers, but never mentioning
+    # visitor numbers at all). If the LLM didn't say CONFIRMED, this can
+    # only ever land as "unverified" — not "fact".
+    if untrusted_matches >= 3 or trusted_matches >= 1:
+        return {**state, **_make_result(
+            "unverified",
+            min(0.40 + ratio * 0.12, 0.60),
+            summary or "⚠️ الخبر منتشر لكن لم يُؤكَّد من مصادر موثوقة",
+            sources,
+        )}
 
     return {**state, **_make_result(
             "unverified",

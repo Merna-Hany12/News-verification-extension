@@ -25,8 +25,18 @@ class HAQQState(TypedDict):
     bodies_fetched: bool
 
     # set by llm_verify_node
-    llm_verdict:    Optional[str]   # CONFIRMED | UNCONFIRMED | CONTRADICTED
-    llm_reasoning:  Optional[str]
+    llm_verdict:         Optional[str]   # CONFIRMED | UNCONFIRMED | CONTRADICTED | NON_NEWS
+    llm_reasoning:       Optional[str]
+    llm_topic_mismatch:  bool            # FIX: was set by llm_verify_node/read by score_node
+                                          # but never declared here — undeclared keys aren't
+                                          # guaranteed to survive LangGraph's state merge
+                                          # between node transitions.
+    total_tokens:        int             # FIX: same issue — llm_verify_node attaches these
+    total_cost_usd:      float           # on every real Groq call, but since they weren't
+    prompt_tokens:       int             # part of the schema, they were dropped before
+    completion_tokens:   int             # reaching `final` in run_verify(), showing up as
+                                          # 0 tokens / $0 cost for every non-agent run even
+                                          # though the LLM was genuinely being called.
 
     # set by score_node / early exits
     verdict:        Optional[str]   # fact | unverified | fake | non_news

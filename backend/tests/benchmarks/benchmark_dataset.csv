@@ -1,62 +1,93 @@
-text,lang,expected_verdict
-England lose World Cup 2026 semifinal to Argentina after late comeback,en,fact
-US carries out fifth consecutive day of strikes on Tehran and other Iranian targets,en,fact
-US-mediated talks in Rome move toward Israel-Lebanon military pilot zones,en,fact
-Israeli forces kill four people in Gaza including a 6-year-old girl,en,fact
-TSMC raises spending outlook after strong earnings guidance,en,fact
-100-plus House Democrats vote to cut military aid to Israel,en,fact
-EU mandates driver distraction detection systems in all newly registered cars,en,fact
-Mistral releases Leanstral 1.5 with formal software verification via Lean 4,en,fact
-OpenAI's Deployment Company acquires applied-AI firm Northslope,en,fact
-Google rolls out Android 17 with floating windows and new Gemini features,en,fact
-Nvidia CEO Jensen Huang keynotes CES 2026 on physical-world AI,en,fact
-Former congressman Barney Frank dies at age 86,en,fact
-"Fact-checkers report over 1,500 debunked claims published in past year",en,fact
-Olivia Attwood rumored to attempt second I'm a Celebrity run,en,unverified
-AI-generated Zendaya 'wedding photos' circulate before being addressed on air,en,unverified
-Viral post falsely claims Treasury declared US government insolvent,en,fake
-"Claim that ICE pays bonuses per arrest lacks evidence, agency says",en,non_news
-'National Rape Day' hoax resurfaces on TikTok years after being debunked,en,non_news
-Woody Harrelson shares miscaptioned video claiming to show 5G tower removed in China,en,unverified
-Facebook hoax falsely claims a serial killer is loose in US cities,en,unverified
-Op-ed argues descendants of refugees now support policies against similar refugees,en,non_news
-Editorial: Massachusetts residents and businesses face growing unaffordability,en,unverified
-Longtime Washington Post columnist Joe Davidson describes resigning over 'too opinionated' column,en,non_news
-Editor's note explains Jacksonville Daily News' shift to a weekly opinion page,en,non_news
-Newsletter analysis argues AI proposal adds pressure for stronger oversight,en,unverified
-Feature asks whether bees and ChatGPT could be considered conscious,en,fact
-Commentary describes Washington Post opinion section pivoting toward conservative themes,en,fact
-Column explores whether political populism should be seen as bipartisan phenomenon,en,fact
-خسارة منتخب مصر أمام الأرجنتين 2-3 في ثمن نهائي كأس العالم 2026 وسط جدل تحكيمي واسع,ar,fact
-استبعاد الحكم الفرنسي لمباراة مصر والأرجنتين من كأس العالم 2026,ar,fact
-البنك المركزي المصري يعلن ارتفاع عجز الحساب الجاري إلى 14.6 مليار دولار,ar,fact
-حسابات مزيفة تنتحل هوية الحكم الفرنسي لوتيكسييه لإثارة الجدل بعد مباراة مصر والأرجنتين,ar,non_news
-NASA's Apollo 11 mission landed the first humans on the Moon in July 1969.,en,fact
-The World Health Organization declared COVID-19 a pandemic in March 2020.,en,fact
-Egypt and Ethiopia have been in long-running talks over the Grand Ethiopian Renaissance Dam on the Nile.,en,fact
-The 2022 FIFA World Cup was held in Qatar.,en,fact
-The Suez Canal was blocked for six days in March 2021 after a container ship ran aground.,en,fact
-هبط رواد فضاء أبولو 11 على سطح القمر في يوليو 1969.,ar,fact
-أعلنت منظمة الصحة العالمية جائحة كورونا في مارس 2020.,ar,fact
-توقف الملاحة في قناة السويس لمدة ستة أيام في مارس 2021 بعد جنوح سفينة حاويات.,ar,fact
-Scientists announced this week they have found a full cure for the common cold.,en,unverified
-A new species of dinosaur was discovered alive and well in the Amazon rainforest.,en,unverified
-تم العثور على مدينة أطلانطس المفقودة بالكامل تحت مياه البحر الأبيض المتوسط هذا الأسبوع.,ar,unverified
-أفادت تقارير غير مؤكدة بأن دولة عربية ستحظر استخدام النقود الورقية اعتباراً من الشهر المقبل.,ar,unverified
-What's your favorite pizza topping? Mine is definitely mushrooms.,en,non_news
-"I think Mondays should just be cancelled, who's with me?",en,non_news
-Can anyone recommend a good book to read on a rainy day?,en,non_news
-ما هو طبقك المفضل في رمضان؟ أنا أحب الكنافة كثيراً.,ar,non_news
-أشعر بالملل اليوم، هل لديكم اقتراحات لفيلم جيد لمشاهدته الليلة؟,ar,non_news
-"The United States launched new airstrikes against Iran, and Tehran responded by targeting U.S.-allied countries in the Mideast.",en,fact
-Iran's late Supreme Leader Ayatollah Ali Khamenei was buried in Mashhad after a multiday funeral procession.,en,fact
-New suspected Ebola cases have been reported in parts of Congo that were previously unaffected by the outbreak.,en,fact
-President Trump met Ukrainian President Volodymyr Zelenskyy at a NATO summit held in Turkey.,en,fact
-شنّت الولايات المتحدة ضربات جوية جديدة على إيران، وردّت طهران باستهداف دول حليفة لواشنطن في الشرق الأوسط.,ar,fact
-تم دفن المرشد الأعلى الإيراني الراحل آية الله علي خامنئي في مدينة مشهد بعد مراسم تشييع استمرت عدة أيام.,ar,fact
-The World Health Organization announced that the Ebola outbreak in Congo has been fully eradicated as of this month.,en,fact
-أعلنت منظمة الصحة العالمية القضاء الكامل على فيروس إيبولا في الكونغو هذا الشهر.,ar,fact
-"I honestly think these US strikes on Iran are only going to make the region less stable, not more.",en,non_news
-"Whatever your politics, watching two elderly leaders bury a third at a funeral like that felt like the end of an era.",en,non_news
-I don't think another NATO summit is going to fix anything — it's the same photos every time.,en,non_news
-Iran has asked Yemen's Houthi movement to stand ready to close the Red Sea oil route if the United States strikes Iranian power infrastructure three sources told Reuters posing a potent new threat to global energy supplies.,en,fact
+text,lang,expected_verdict,expected_content_type
+England lose World Cup 2026 semifinal to Argentina after late comeback,en,fact,news
+US carries out fifth consecutive day of strikes on Tehran and other Iranian targets,en,fact,news
+US-mediated talks in Rome move toward Israel-Lebanon military pilot zones,en,fact,news
+Israeli forces kill four people in Gaza including a 6-year-old girl,en,fact,news
+TSMC raises spending outlook after strong earnings guidance,en,fact,news
+100-plus House Democrats vote to cut military aid to Israel,en,fact,news
+EU mandates driver distraction detection systems in all newly registered cars,en,fact,news
+Mistral releases Leanstral 1.5 with formal software verification via Lean 4,en,fact,news
+OpenAI's Deployment Company acquires applied-AI firm Northslope,en,fact,news
+Google rolls out Android 17 with floating windows and new Gemini features,en,fact,news
+Nvidia CEO Jensen Huang keynotes CES 2026 on physical-world AI,en,fact,news
+Former congressman Barney Frank dies at age 86,en,fact,news
+"Fact-checkers report over 1,500 debunked claims published in past year",en,fact,news
+Olivia Attwood rumored to attempt second I'm a Celebrity run,en,unverified,news
+AI-generated Zendaya 'wedding photos' circulate before being addressed on air,en,unverified,news
+Viral post falsely claims Treasury declared US government insolvent,en,fake,news
+"Claim that ICE pays bonuses per arrest lacks evidence, agency says",en,non_news,news
+'National Rape Day' hoax resurfaces on TikTok years after being debunked,en,non_news,news
+Woody Harrelson shares miscaptioned video claiming to show 5G tower removed in China,en,unverified,news
+Facebook hoax falsely claims a serial killer is loose in US cities,en,unverified,news
+Op-ed argues descendants of refugees now support policies against similar refugees,en,non_news,non_news
+Editorial: Massachusetts residents and businesses face growing unaffordability,en,unverified,non_news
+Longtime Washington Post columnist Joe Davidson describes resigning over 'too opinionated' column,en,non_news,non_news
+Editor's note explains Jacksonville Daily News' shift to a weekly opinion page,en,non_news,non_news
+Newsletter analysis argues AI proposal adds pressure for stronger oversight,en,unverified,non_news
+Feature asks whether bees and ChatGPT could be considered conscious,en,fact,historical_scientific
+Commentary describes Washington Post opinion section pivoting toward conservative themes,en,fact,non_news
+Column explores whether political populism should be seen as bipartisan phenomenon,en,fact,non_news
+خسارة منتخب مصر أمام الأرجنتين 2-3 في ثمن نهائي كأس العالم 2026 وسط جدل تحكيمي واسع,ar,fact,news
+استبعاد الحكم الفرنسي لمباراة مصر والأرجنتين من كأس العالم 2026,ar,fact,news
+البنك المركزي المصري يعلن ارتفاع عجز الحساب الجاري إلى 14.6 مليار دولار,ar,fact,news
+حسابات مزيفة تنتحل هوية الحكم الفرنسي لوتيكسييه لإثارة الجدل بعد مباراة مصر والأرجنتين,ar,non_news,news
+NASA's Apollo 11 mission landed the first humans on the Moon in July 1969.,en,fact,historical_scientific
+The World Health Organization declared COVID-19 a pandemic in March 2020.,en,fact,news
+Egypt and Ethiopia have been in long-running talks over the Grand Ethiopian Renaissance Dam on the Nile.,en,fact,news
+The 2022 FIFA World Cup was held in Qatar.,en,fact,historical_scientific
+The Suez Canal was blocked for six days in March 2021 after a container ship ran aground.,en,fact,news
+هبط رواد فضاء أبولو 11 على سطح القمر في يوليو 1969.,ar,fact,historical_scientific
+أعلنت منظمة الصحة العالمية جائحة كورونا في مارس 2020.,ar,fact,news
+توقف الملاحة في قناة السويس لمدة ستة أيام في مارس 2021 بعد جنوح سفينة حاويات.,ar,fact,news
+Scientists announced this week they have found a full cure for the common cold.,en,unverified,medical
+A new species of dinosaur was discovered alive and well in the Amazon rainforest.,en,unverified,historical_scientific
+تم العثور على مدينة أطلانطس المفقودة بالكامل تحت مياه البحر الأبيض المتوسط هذا الأسبوع.,ar,unverified,historical_scientific
+أفادت تقارير غير مؤكدة بأن دولة عربية ستحظر استخدام النقود الورقية اعتباراً من الشهر المقبل.,ar,unverified,news
+What's your favorite pizza topping? Mine is definitely mushrooms.,en,non_news,non_news
+"I think Mondays should just be cancelled, who's with me?",en,non_news,non_news
+Can anyone recommend a good book to read on a rainy day?,en,non_news,non_news
+ما هو طبقك المفضل في رمضان؟ أنا أحب الكنافة كثيراً.,ar,non_news,non_news
+أشعر بالملل اليوم، هل لديكم اقتراحات لفيلم جيد لمشاهدته الليلة؟,ar,non_news,non_news
+"The United States launched new airstrikes against Iran, and Tehran responded by targeting U.S.-allied countries in the Mideast.",en,fact,news
+Iran's late Supreme Leader Ayatollah Ali Khamenei was buried in Mashhad after a multiday funeral procession.,en,fact,news
+New suspected Ebola cases have been reported in parts of Congo that were previously unaffected by the outbreak.,en,fact,news
+President Trump met Ukrainian President Volodymyr Zelenskyy at a NATO summit held in Turkey.,en,fact,news
+شنّت الولايات المتحدة ضربات جوية جديدة على إيران، وردّت طهران باستهداف دول حليفة لواشنطن في الشرق الأوسط.,ar,fact,news
+تم دفن المرشد الأعلى الإيراني الراحل آية الله علي خامنئي في مدينة مشهد بعد مراسم تشييع استمرت عدة أيام.,ar,fact,news
+The World Health Organization announced that the Ebola outbreak in Congo has been fully eradicated as of this month.,en,fake,news
+أعلنت منظمة الصحة العالمية القضاء الكامل على فيروس إيبولا في الكونغو هذا الشهر.,ar,fake,news
+"I honestly think these US strikes on Iran are only going to make the region less stable, not more.",en,non_news,non_news
+"Whatever your politics, watching two elderly leaders bury a third at a funeral like that felt like the end of an era.",en,non_news,non_news
+I don't think another NATO summit is going to fix anything — it's the same photos every time.,en,non_news,non_news
+Iran has asked Yemen's Houthi movement to stand ready to close the Red Sea oil route if the United States strikes Iranian power infrastructure three sources told Reuters posing a potent new threat to global energy supplies.,en,fact,news
+Washing your hands with soap for at least 20 seconds helps prevent the spread of infections,en,fact,medical
+Getting an annual flu vaccine is recommended for most adults by health authorities,en,fact,medical
+Finishing a full course of prescribed antibiotics even after you feel better helps prevent antibiotic resistance,en,fact,medical
+Regular moderate exercise helps lower blood pressure over time,en,fact,medical
+Keeping vaccines on the recommended childhood schedule protects against preventable diseases,en,fact,medical
+غسل اليدين بالصابون لمدة 20 ثانية على الأقل يساعد في الوقاية من انتقال العدوى,ar,fact,medical
+إكمال العلاج الكامل بالمضاد الحيوي حتى بعد تحسن الأعراض يقلل من مقاومة البكتيريا للمضادات,ar,fact,medical
+It's fine to stop taking your antibiotics as soon as you feel better,en,unverified,medical
+Giving honey to infants under one year old is a safe way to soothe their cough,en,unverified,medical
+"Taking megadoses of vitamin C, far above the recommended amount, will cure the flu faster",en,fake,medical
+Applying toothpaste or butter on a burn helps it heal faster,en,fake,medical
+Completely fasting from food and water for several days flushes toxins from the body and cures illness,en,fake,medical
+يمكنك التوقف عن أخذ المضاد الحيوي بمجرد شعورك بالتحسن دون إكمال الجرعة الموصوفة,ar,unverified,medical
+وضع معجون الأسنان أو الزبدة على الحروق يساعد على شفائها بسرعة أكبر,ar,fake,medical
+إعطاء العسل للرضع أقل من عام لتهدئة السعال أمر آمن تماماً,ar,unverified,medical
+The Suez Canal officially opened for navigation in 1869,en,fact,historical_scientific
+Ancient Egyptian civilization used a solar calendar of 365 days,en,fact,historical_scientific
+The Library of Alexandria was one of the largest and most significant libraries of the ancient world,en,fact,historical_scientific
+The printing press was invented by Johannes Gutenberg in the 15th century,en,fact,historical_scientific
+The French Revolution began in 1789,en,fact,historical_scientific
+افتتحت قناة السويس رسمياً للملاحة عام 1869,ar,fact,historical_scientific
+استخدم المصريون القدماء تقويماً شمسياً مكوناً من 365 يوماً,ar,fact,historical_scientific
+اخترع يوهانس غوتنبرغ المطبعة في القرن الخامس عشر,ar,fact,historical_scientific
+Medieval Europeans commonly believed the Earth was flat before Columbus proved otherwise,en,fake,historical_scientific
+Albert Einstein failed math as a student,en,fake,historical_scientific
+The Ottoman Empire executed anyone who tried to modernize the Egyptian army in the 19th century,en,unverified,historical_scientific
+Ancient Romans regularly used vomitoriums as rooms specifically for vomiting during feasts,en,fake,historical_scientific
+The pyramids of Giza were built by slaves whipped into forced labor,en,unverified,historical_scientific
+كان الأوروبيون في العصور الوسطى يعتقدون أن الأرض مسطحة حتى أثبت كولومبوس العكس,ar,fake,historical_scientific
+بُنيت أهرامات الجيزة بأيدي عبيد أُجبروا على العمل تحت السياط,ar,unverified,historical_scientific
+رسب ألبرت أينشتاين في مادة الرياضيات عندما كان طالباً,ar,fake,historical_scientific
