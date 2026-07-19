@@ -19,6 +19,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+# Ensure the root directory is in sys.path so 'import backend' works
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
+
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 
 # Adjust these imports to match your actual project layout.
@@ -67,6 +70,8 @@ class Prediction:
     degraded: bool = False   # True if rate-limit/classifier-init noise was detected
                              # for this row — means the pipeline didn't actually run
                              # cleanly, so this row's correctness is less informative
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
 
 
 class _use_extractor:
@@ -140,8 +145,15 @@ class _Tee(io.TextIOBase):
             st.flush()
 
 
-async def run_benchmark(dataset_path: Path) -> list[Prediction]:
-    graph = build_graph()
+async def run_benchmark(dataset_path: Path, use_agent: bool = False) -> list[Prediction]:
+    if use_agent:
+        from backend.agent_pipeline.builder import build_agent_graph, run_agent_verify
+        graph = build_agent_graph()
+        verify_func = run_agent_verify
+    else:
+        graph = build_graph()
+        verify_func = run_verify
+        
     rows = _load_dataset(dataset_path)
     predictions: list[Prediction] = []
 
@@ -151,7 +163,7 @@ async def run_benchmark(dataset_path: Path) -> list[Prediction]:
 
         start = time.perf_counter()
         with contextlib.redirect_stdout(tee):
-            result = await run_verify(graph, row["text"], row["lang"])
+            result = await verify_func(graph, row["text"], row["lang"])
         latency = time.perf_counter() - start
 
         captured = buf.getvalue()
@@ -165,6 +177,8 @@ async def run_benchmark(dataset_path: Path) -> list[Prediction]:
             latency_s=latency,
             explanation=result.get("explanation", ""),
             degraded=degraded,
+            total_tokens=result.get("total_tokens", 0),
+            total_cost_usd=result.get("total_cost_usd", 0.0),
         )
         predictions.append(pred)
 
@@ -248,6 +262,8 @@ def _summary(predictions: list[Prediction]) -> dict:
         "macro_f1":  f1_score(y_true, y_pred, average="macro", zero_division=0),
         "avg_latency": sum(p.latency_s for p in predictions) / len(predictions),
         "degraded_pct": sum(1 for p in predictions if p.degraded) / len(predictions),
+        "avg_tokens": sum(p.total_tokens for p in predictions) / len(predictions) if predictions else 0,
+        "total_cost": sum(p.total_cost_usd for p in predictions),
     }
 
 
@@ -255,14 +271,15 @@ def print_comparison(all_results: dict[str, list[Prediction]]) -> None:
     print("\n" + "=" * 70)
     print("EXTRACTOR COMPARISON  (accuracy/F1 computed on CLEAN rows only)")
     print("=" * 70)
-    print(f"{'extractor':<12}{'accuracy':>12}{'macro F1':>12}{'avg latency':>15}{'degraded %':>13}")
+    print(f"{'extractor/mode':<16}{'accuracy':>12}{'macro F1':>12}{'avg latency':>15}{'degraded %':>13}{'avg tokens':>13}{'total cost':>13}")
     degraded_pcts = []
     for name, predictions in all_results.items():
         s = _summary(predictions)
         degraded_pcts.append(s["degraded_pct"])
         print(
-            f"{name:<12}{s['accuracy']:>12.2%}{s['macro_f1']:>12.2%}"
+            f"{name:<16}{s['accuracy']:>12.2%}{s['macro_f1']:>12.2%}"
             f"{s['avg_latency']:>14.2f}s{s['degraded_pct']:>13.1%}"
+            f"{s.get('avg_tokens', 0):>13.0f}{s.get('total_cost', 0):>13.4f}$"
         )
 
     if len(set(round(p, 1) for p in degraded_pcts)) > 1:
@@ -276,8 +293,14 @@ def print_comparison(all_results: dict[str, list[Prediction]]) -> None:
 
 def main() -> None:
     _initialize_pipeline()
-    dataset_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DATASET
-    which = sys.argv[2] if len(sys.argv) > 2 else "both"
+    
+    args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
+    dataset_path = Path(args[0]) if len(args) > 0 else DEFAULT_DATASET
+    which = args[1] if len(args) > 1 else "both"
+    
+    run_all = "--all" in sys.argv
+    use_agent_flags = [False, True] if run_all else ["--agent" in sys.argv]
+    
     extractors_to_run = EXTRACTORS if which == "both" else {which: EXTRACTORS[which]}
 
     all_results: dict[str, list[Prediction]] = {}
@@ -288,12 +311,14 @@ def main() -> None:
     asyncio.set_event_loop(loop)
 
     try:
-        for name, extractor_fn in extractors_to_run.items():
-            print(f"\n{'#' * 70}\n# RUNNING WITH EXTRACTOR: {name}\n{'#' * 70}")
-            with _use_extractor(extractor_fn):
-                predictions = loop.run_until_complete(run_benchmark(dataset_path))
-            report(predictions)
-            all_results[name] = predictions
+        for use_agent in use_agent_flags:
+            for name, extractor_fn in extractors_to_run.items():
+                run_name = f"{name} (agent)" if use_agent else f"{name} (traditional)"
+                print(f"\n{'#' * 70}\n# RUNNING WITH EXTRACTOR: {run_name}\n{'#' * 70}")
+                with _use_extractor(extractor_fn):
+                    predictions = loop.run_until_complete(run_benchmark(dataset_path, use_agent=use_agent))
+                report(predictions)
+                all_results[run_name] = predictions
     finally:
         # Give httpx a chance to close connections cleanly before the loop dies
         loop.run_until_complete(asyncio.sleep(0.25))

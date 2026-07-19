@@ -101,8 +101,17 @@ async def run_verify(graph, text: str, lang: str) -> dict:
     }
     final = await graph.ainvoke(initial_state)
     return {
-        "verdict":     final.get("verdict",     "unverified"),
-        "confidence":  final.get("confidence",  0.0),
-        "explanation": final.get("explanation", ""),
-        "sources":     final.get("sources",     []),
+        "verdict":           final.get("verdict",     "unverified"),
+        "confidence":        final.get("confidence",  0.0),
+        "explanation":       final.get("explanation", ""),
+        "sources":           final.get("sources",     []),
+        # FIX: these were previously dropped here even though llm_verify_node
+        # attaches them to state on every successful Groq call. That's why
+        # traditional (non-agent) benchmark rows always showed 0 tokens/$0
+        # cost even when the LLM was clearly invoked (visible in the logs) —
+        # the numbers existed in `final`, they just weren't copied out.
+        "total_tokens":      final.get("total_tokens",      0),
+        "total_cost_usd":    final.get("total_cost_usd",    0.0),
+        "prompt_tokens":     final.get("prompt_tokens",     0),
+        "completion_tokens": final.get("completion_tokens", 0),
     }
