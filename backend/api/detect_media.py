@@ -50,13 +50,21 @@ class NotAVideoError(Exception):
 async def _check_content_type(url: str, timeout: float = 6.0) -> str:
     """
     Cheap HEAD request to get the server's OWN reported Content-Type
-    before deciding how to handle a URL. This is the authoritative
-    signal for "is this actually an image or a video" — unlike
-    readyState==0 in Playwright, which is AMBIGUOUS (it fires both for
-    "this genuinely isn't a video" AND for "this IS a video but failed
-    to load for some unrelated reason", and conflating those two led to
-    a real video being misclassified as an image and given a bogus
-    single-frame result instead of an honest retry/failure).
+    before deciding how to handle a URL.
+
+    NOTE: this is informational only now, NOT a hard skip signal. In
+    practice, Facebook's CDN sometimes serves a static thumbnail
+    (image/jpeg) to an unauthenticated HEAD request even when the
+    underlying post is a real video — the HEAD request doesn't carry
+    the poster's session, so it gets the same fallback preview a
+    logged-out visitor would see. Treating that as proof "this isn't a
+    video" produced false negatives (real videos silently analyzed as
+    a single thumbnail frame). The route handler now uses this only to
+    decide whether to PREFER the permalink route when available; it no
+    longer skips Playwright outright when a permalink is missing.
+    Playwright's own NotAVideoError (readyState stuck at 0 inside a
+    real browser) is the actual, trustworthy signal for "this really
+    isn't a video."
 
     Returns "" if the HEAD request fails or the header is missing —
     callers should treat that as inconclusive, not as proof either way.
@@ -179,7 +187,7 @@ async def _extract_frames_playwright(url: str, is_permalink: bool = False) -> li
                 await page.goto(url, wait_until="domcontentloaded", timeout=45000)
                 await page.wait_for_timeout(3000)
                 await page.evaluate("window.scrollBy(0, 500)")
-                
+
                 # Try to click the center to dismiss overlays or hit play
                 try:
                     await page.mouse.click(200, 300)
@@ -528,7 +536,7 @@ async def detect_media(request: DetectMediaRequest, req: Request):
                 img_data = base64.b64decode(b64)
                 img = Image.open(BytesIO(img_data)).convert("RGB")
                 frames.append(img)
-            
+
             if frames:
                 extraction_method = "captureVisibleTab"
                 timestamps = [None] * len(frames)
@@ -543,29 +551,33 @@ async def detect_media(request: DetectMediaRequest, req: Request):
         target_url, is_permalink = request.video_url, False
         print(f"[HAQQ] Processing video URL: {target_url[:80]}...")
 
-        # Check the server's OWN reported Content-Type before attempting
-        # Playwright at all — this is the authoritative signal, unlike
-        # inferring "is this a video" from readyState after a load
-        # failure (which is ambiguous: it can't tell "this really isn't
-        # a video" apart from "this IS a video but failed to load for
-        # some unrelated reason", and conflating those previously caused
-        # a genuine video to be misclassified as a static image).
+        # Content-Type is now used ONLY to decide whether to PREFER the
+        # permalink route — it is no longer a hard "skip Playwright"
+        # signal. Facebook's CDN can serve a plain thumbnail
+        # (image/jpeg) to an unauthenticated HEAD request even when the
+        # underlying post is a genuine video, since the HEAD request
+        # doesn't carry the poster's session. Trusting that as proof
+        # "not a video" produced false negatives — real videos silently
+        # reduced to a single thumbnail frame. Playwright's own
+        # NotAVideoError (readyState stuck at 0 in a REAL browser) is
+        # the trustworthy signal now; it's checked further below no
+        # matter which path we take here.
         content_type = await _check_content_type(target_url)
         if content_type.startswith("image/"):
             if request.post_permalink:
-                print(f"[HAQQ] Video URL turned out to be an image ({content_type}), but post_permalink is available. "
-                      f"Using post_permalink with Playwright to extract 8 frames.")
+                print(f"[HAQQ] Content-Type looks like an image ({content_type}) — "
+                      f"preferring post_permalink with Playwright, since the permalink page "
+                      f"is more likely to yield the real video than a bare CDN URL.")
                 target_url, is_permalink = request.post_permalink, True
             else:
-                print(f"[HAQQ] Content-Type confirms this is an image ({content_type}) — "
-                      f"using single-image analysis directly, skipping Playwright entirely")
-                try:
-                    img = await _download_single_image(target_url)
-                    frames, extraction_method = [img], "single-image"
-                    timestamps = [None]
-                    target_url = None  # already handled — skip the video branch below
-                except Exception as e:
-                    raise HTTPException(status_code=400, detail=f"Could not download image: {e}")
+                print(f"[HAQQ] Content-Type looks like an image ({content_type}) but no "
+                      f"post_permalink is available — NOT skipping Playwright. Attempting "
+                      f"real extraction on the raw video_url anyway; will only fall back to "
+                      f"single-image analysis if Playwright itself confirms via NotAVideoError "
+                      f"(readyState stuck at 0).")
+                # target_url/is_permalink intentionally left as (video_url, False) —
+                # fall through to the Playwright attempt below instead of
+                # short-circuiting to single-image here.
         elif content_type and not content_type.startswith("video/"):
             print(f"[HAQQ] Content-Type is neither image/* nor video/* ({content_type}) — "
                   f"proceeding with Playwright anyway, but this is worth investigating "
@@ -598,11 +610,12 @@ async def detect_media(request: DetectMediaRequest, req: Request):
             timestamps = [fr["timestamp"] for fr in frame_records]
             saved_frames_dir = save_frames_to_disk(frames, timestamps, target_url)
         except NotAVideoError as e:
-            # This video_url never produced any decodable video data at
-            # all (readyState stayed 0) — a hard signal it's actually a
-            # static image. Re-route to the SAME image path used above,
-            # instead of repeatedly screenshotting an empty video box
-            # and returning an identical, meaningless result every time.
+            # This is now the ONLY trusted signal that a video_url is
+            # actually a static image — readyState stayed 0 inside a
+            # real browser, not just a HEAD-request guess. Re-route to
+            # the SAME image path used above, instead of repeatedly
+            # screenshotting an empty video box and returning an
+            # identical, meaningless result every time.
             print(f"[HAQQ] {e} — redirecting to single-image analysis instead")
             try:
                 img = await _download_single_image(target_url)
@@ -625,7 +638,7 @@ async def detect_media(request: DetectMediaRequest, req: Request):
                     saved_frames_dir = save_frames_to_disk(frames, timestamps, request.video_url)
                 except Exception as img_e:
                     raise HTTPException(
-                        status_code=400, 
+                        status_code=400,
                         detail=f"Playwright failed ({e}), and fallback image download also failed: {img_e}"
                     )
             else:
