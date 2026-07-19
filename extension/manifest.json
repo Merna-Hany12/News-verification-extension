@@ -3,13 +3,11 @@
   "name": "HAQQ — حقّق",
   "version": "3.1.0",
   "description": "كاشف المحتوى المضلل على فيسبوك، إنستغرام وتيك توك — Misinformation & AI-media detector",
-
   "permissions": [
     "storage",
     "scripting",
     "alarms"
   ],
-
   "host_permissions": [
     "https://www.facebook.com/*",
     "https://web.facebook.com/*",
@@ -24,14 +22,14 @@
     "https://api.currentsapi.services/*",
     "https://gnews.io/*",
     "https://news.google.com/*",
-    "https://html.duckduckgo.com/*"
+    "https://html.duckduckgo.com/*",
+    "https://*.app.github.dev/*",
+    "https://*.githubpreview.dev/*"
   ],
-
   "background": {
     "service_worker": "background/service_worker.js",
     "type": "module"
   },
-
   "content_scripts": [
     {
       "matches": [
@@ -41,23 +39,27 @@
         "https://www.instagram.com/*",
         "https://www.tiktok.com/*"
       ],
-      "js":  ["content/content.js"],
-      "css": ["content/content.css"],
+      "js": [
+        "content/content.js"
+      ],
+      "css": [
+        "content/content.css"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }
   ],
-
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {
       "128": "icons/icon-128.png"
     }
   },
-
   "web_accessible_resources": [
     {
-      "resources": ["icons/*"],
+      "resources": [
+        "icons/*"
+      ],
       "matches": [
         "https://www.facebook.com/*",
         "https://web.facebook.com/*",

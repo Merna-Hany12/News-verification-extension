@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Python
+backend/.venv
+backend/venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+
+# IDE
+.vscode
+.idea
+
+# Notebooks (not needed for backend)
+notebooks
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Extension (not needed in backend image)
+extension
+
+# Lock file (not needed at runtime)
+backend/uv.lock
+
+# Docker files themselves
+Dockerfile
+Dockerfile.cpu
+docker-compose.yml
+docker-compose.cpu.yml
+Caddyfile
+setup.sh
+
+# Misc
+*.mp4
+*.md
