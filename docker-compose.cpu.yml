@@ -1,0 +1,15 @@
+services:
+  haqq-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    container_name: haqq-backend-cpu
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/.env
+    volumes:
+      - model-cache:/root/.cache
+
+volumes:
+  model-cache:

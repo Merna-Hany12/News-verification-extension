@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies for EasyOCR/Pillow/OpenCV
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+    ffmpeg curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python requirements
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application files
+COPY backend/ ./backend/
+
+# Pre-download models to make the startup faster
+RUN python -c "from transformers import pipeline; pipeline('zero-shot-classification', model='MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7')"
+RUN python -c "import easyocr; easyocr.Reader(['ar', 'en'], gpu=False)"
+
+EXPOSE 8000
+CMD ["python", "-m", "backend.main"]
