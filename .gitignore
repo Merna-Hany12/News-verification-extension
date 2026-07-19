@@ -5,6 +5,8 @@ extension/background/config.js
 backend/venv/
 backend/__pycache__/
 backend/**/*.pyc
+backend/**/__pycache__/
+
 backend/.env
 .venv/
 
@@ -16,3 +18,5 @@ Thumbs.db
 .vscode/
 .idea/
 backend/.env
+haqq_debug_frames
+backend/fb_page.html

@@ -1,3 +1,16 @@
+import sys
+import asyncio
+
+ 
+# MUST run before any other import that could touch asyncio/uvicorn's
+# event loop — Playwright launches Chromium as a subprocess, which on
+# Windows requires the Proactor event loop (the default Selector loop
+# does not implement asyncio.create_subprocess_exec). Setting this here,
+# as the very first lines of the entire module, is the most reliable
+# place for it to actually take effect regardless of how this app is
+# launched (uvicorn CLI, uv run, --reload, etc).
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +23,8 @@ from backend.api.detect_media import router as media_router
 
 import cv2
 import os
+os.environ["USE_TF"] = "0"
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
 from backend.models.gend import GenD
 import torch
 

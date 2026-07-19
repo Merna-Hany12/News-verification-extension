@@ -55,6 +55,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         case "HAQQ_DETECT_MEDIA":
           return sendResponse({ data: await detectMedia(msg.payload) });
 
+        case "HAQQ_CAPTURE_TAB":
+          // Used by content.js to capture the visible tab for video frame extraction.
+          // This bypasses CORS/tainted-canvas because captureVisibleTab captures
+          // composited pixels from the GPU, not DOM element data.
+          try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab?.id) return sendResponse({ error: "No active tab" });
+            const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+              format: "jpeg",
+              quality: 85,
+            });
+            return sendResponse({ dataUrl });
+          } catch (e) {
+            console.warn("[HAQQ] captureVisibleTab error:", e.message);
+            return sendResponse({ error: e.message });
+          }
+
         case "HAQQ_OCR_IMAGE":
           return sendResponse({ data: await ocrImage(msg.payload) });
 
@@ -182,23 +199,38 @@ async function verifyText({ text, lang }) {
 // video's poster frame plus the video itself).
 // Expected response shape: { verdict, confidence, explanation, mediaType }
 // where verdict is one of: real | ai_generated | manipulated | inconclusive
-async function detectMedia({ imageUrl, videoUrl }) {
-  if (!imageUrl && !videoUrl)
+async function detectMedia({ imageUrl, videoUrl, postPermalink, frames }) {
+  if (!imageUrl && !videoUrl && !postPermalink && !(frames && frames.length))
     return result("inconclusive", 0, "لا توجد وسائط لتحليلها.", []);
 
-  const cKey = "media::" + (videoUrl || imageUrl);
+  const cKey = "media::" + (videoUrl || postPermalink || imageUrl || "frames");
   if (cache.has(cKey))    return cache.get(cKey);
   if (inFlight.has(cKey)) return inFlight.get(cKey);
 
   const promise = (async () => {
     try {
+      // Convert data URLs to raw base64 for the backend
+      let extractedFrames = null;
+      if (frames && frames.length) {
+        extractedFrames = frames.map(f => {
+          if (f.startsWith("data:")) return f.split(",")[1];
+          return f;
+        });
+        console.log(`[HAQQ] Sending ${extractedFrames.length} client-captured frames to backend`);
+      }
+
       const res = await fetch(`${NGROK_URL}/detect-media`, {
         method:  "POST",
         headers: {
           "Content-Type":               "application/json",
           "ngrok-skip-browser-warning": "true",
         },
-        body: JSON.stringify({ image_url: imageUrl || null, video_url: videoUrl || null }),
+        body: JSON.stringify({ 
+          image_url: imageUrl || null, 
+          video_url: videoUrl || null,
+          post_permalink: postPermalink || null,
+          extracted_frames: extractedFrames || null
+        }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

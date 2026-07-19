@@ -1,53 +1,60 @@
-// ─── HAQQ Content Script v16 ─────────────────────────────────
+// ─── HAQQ Content Script v18 ─────────────────────────────────
+// v18 change — DOUBLE-INJECTION GUARD:
+//   "Uncaught SyntaxError: Identifier 'PROCESSED_ATTR' has already been
+//   declared" means this file's top-level const/function declarations
+//   ran twice in the same page (e.g. the manifest injecting it plus a
+//   chrome.scripting.executeScript call, or the extension reloading
+//   while the tab stayed open). Every top-level declaration is now
+//   inside a single IIFE gated on a window-scoped flag, so a second
+//   injection becomes a harmless no-op instead of a crash. No other
+//   behavior changed — same functions, same logic, just wrapped.
+//
+// v17 changes:
+//   1. DEDUP FIX — v16 accidentally defined makeBtn() and verifyMedia()
+//      TWICE in the same file (once in the "SECTION 2/3" blocks with
+//      the retry/permalink logic, then again unchanged further down
+//      under the old TOOLBAR / AI-MEDIA sections). In JS, the second
+//      `function name() {}` declaration silently wins — so the
+//      retry/permalink logic was dead code that never actually ran.
+//      This file keeps exactly ONE definition of each.
+//   2. CLIENT-SIDE FRAME CAPTURE — for "aimedia", we now try to grab
+//      frames directly off the live, already-authenticated <video>
+//      element in the page (canvas capture) BEFORE falling back to
+//      sending a CDN URL/permalink to the backend for server-side
+//      extraction. This avoids re-fetching the video without the
+//      user's session/cookies entirely for the common case. Falls
+//      back to the old getVideoUrlWithRetry() path automatically if
+//      capture isn't possible yet (video not mounted) or is blocked
+//      (tainted canvas — cross-origin video without permissive CORS).
+//
 // v16 fix (from screenshot showing Like/Comment/Share crushed by the
-// verdict badge): every prior attempt to merge the toolbar directly
-// INTO a platform's native action row (Facebook's Like/Comment/Share,
-// or Instagram/TikTok's icon column) kept breaking that row's layout
-// once a badge also needed to appear nearby — v15's row-tagging fix
-// helped but the underlying merge was still fragile.
+// verdict badge): toolbar (buttons) and any resulting badge now live
+// inside a single dedicated `.haqq-panel` div, inserted as a SIBLING
+// right after the native action row — never merged into it.
 //
-// Switched approach entirely: the toolbar (buttons) and any resulting
-// badge now live inside a single dedicated `.haqq-panel` div, inserted
-// as a SIBLING right after the native action row — never merged into
-// it. getOrCreatePanel() finds the native row (reusing the existing
-// Facebook isFacebookActionRow detection / IG-TikTok anchor selectors)
-// purely to know WHERE to place the panel, then creates one normal
-// block-level div after it. Both makeToolbar's buttons and any later
-// verdict/non-news badge get appended into that same panel. This
-// guarantees Like/Comment/Share can never be touched, at the cost of
-// the toolbar sitting just below the action row instead of visually
-// merged into it — worth it after three rounds of layout breakage from
-// the merge approach.
+// v14 fix (carried over): only mark PROCESSED_ATTR once there's
+// confirmed text/media to show, so early-in-DOM posts aren't
+// permanently skipped before their media mounts.
 //
-// v14 fix (carried over): the first post in the feed (Facebook and
-// TikTok both reported) wasn't getting a toolbar at all. Root cause:
-// processPost() used to mark a post as PROCESSED_ATTR-"done" before
-// extractAll() had even run — so if the scanner reached a post before
-// its <video>/<img> had actually mounted, it would find no media,
-// permanently mark itself "already handled", and never get a toolbar
-// even once the media loaded a moment later. Fixed by only marking
-// PROCESSED_ATTR once there's confirmed text/media to show.
+// v13 fix (carried over): Facebook action-row detection primarily via
+// `data-ad-rendering-role`, aria-label strings as fallback.
 //
-// v13 fix (carried over): Facebook's real aria-labels are dynamic
-// ("React with Like to {page}'s post", "Comment on {page}'s post") or a
-// different fixed string for Share ("Send this to friends or post it
-// on your profile."). Switched primary detection to Facebook's static
-// `data-ad-rendering-role` marker (like_button/comment_button/
-// share_button), with the real aria-label strings as fallback.
+// v7 change (carried over): extension-context-invalidation guard.
 //
-// v7 change (carried over): extension-context-invalidation guard —
-// any chrome.runtime call is wrapped; first failure permanently stops
-// the observer/interval and shows a "reload the page" state.
-//
-// v6 change (carried over): Facebook gets "content" (text+image) AND
-// "aimedia" (AI-media). Instagram/TikTok get "aimedia" ONLY — a
-// deliberate product decision, not a technical limitation.
+// v6 change (carried over): Facebook gets "content" + "aimedia".
+// Instagram/TikTok get "aimedia" ONLY — deliberate product decision.
 //
 // NOTE: Instagram/TikTok POST_SELECTORs and Facebook's action-row
-// markers below are best-effort based on commonly-seen attributes as of
-// this writing. All three platforms change markup often — verify
-// against live pages via devtools and adjust before relying on this in
-// production.
+// markers are best-effort based on commonly-seen attributes as of this
+// writing. All three platforms change markup often — verify against
+// live pages via devtools before relying on this in production.
+(function () {
+  if (window.__HAQQ_INJECTED__) {
+    console.log("[HAQQ] Already injected on this page — skipping re-init.");
+    return;
+  }
+  window.__HAQQ_INJECTED__ = true;
+
 const PROCESSED_ATTR = "data-haqq-processed";
 const DEBUG = true;
 function log(...args) { if (DEBUG) console.log("[HAQQ]", ...args); }
@@ -104,44 +111,42 @@ const PLATFORM_CONFIG = {
       '[aria-label^="React with Like to"]',
     ],
   },
-instagram: {
-  mediaOnly: true,
-  postSelector: 'article',
-  seeMoreLabels: ["more", "... more", "المزيد"],
-  toolbarAnchorSelectors: [
-    'section svg[aria-label="Send Post"]',
-    'section svg[aria-label="Share"]',
-    'section svg[aria-label="Comment"]',
-    'section svg[aria-label="Like"]',
-  ],
-  // Where the button icon should sit — right before the bookmark icon,
-  // matching the gap in the marked screenshot. VERIFY LIVE — IG's
-  // bookmark aria-label has been "Save" historically but changes.
-  buttonInsertBeforeSelectors: [
-    'section svg[aria-label="Save"]',
-  ],
-},
-tiktok: {
-  mediaOnly: true,
-  postSelector: [
-    '[data-e2e="recommend-list-item-container"]',
-    '[data-e2e="feed-video"]',
-    '[data-e2e="browse-video"]',
-  ].join(", "),
-  seeMoreLabels: ["more"],
-  toolbarAnchorSelectors: [
-    '[data-e2e="share-icon"]',
-    '[data-e2e="comment-icon"]',
-    '[data-e2e="like-icon"]',
-  ],
-  // Insert right before the like (heart) icon — the gap right after
-  // the avatar, matching the marked screenshot.
-  buttonInsertBeforeSelectors: [
-    '[data-e2e="like-icon"]',
-  ],
-},
+  instagram: {
+    mediaOnly: true,
+    postSelector: 'article',
+    seeMoreLabels: ["more", "... more", "المزيد"],
+    toolbarAnchorSelectors: [
+      'section svg[aria-label="Send Post"]',
+      'section svg[aria-label="Share"]',
+      'section svg[aria-label="Comment"]',
+      'section svg[aria-label="Like"]',
+    ],
+    // Where the button icon should sit — right before the bookmark
+    // icon. VERIFY LIVE — IG's bookmark aria-label has historically
+    // been "Save" but changes.
+    buttonInsertBeforeSelectors: [
+      'section svg[aria-label="Save"]',
+    ],
+  },
+  tiktok: {
+    mediaOnly: true,
+    postSelector: [
+      '[data-e2e="recommend-list-item-container"]',
+      '[data-e2e="feed-video"]',
+      '[data-e2e="browse-video"]',
+    ].join(", "),
+    seeMoreLabels: ["more"],
+    toolbarAnchorSelectors: [
+      '[data-e2e="share-icon"]',
+      '[data-e2e="comment-icon"]',
+      '[data-e2e="like-icon"]',
+    ],
+    // Insert right before the like (heart) icon.
+    buttonInsertBeforeSelectors: [
+      '[data-e2e="like-icon"]',
+    ],
+  },
 };
-
 
 const CFG = PLATFORM_CONFIG[PLATFORM];
 const POST_SELECTOR = CFG.postSelector;
@@ -231,71 +236,218 @@ function extractAll(postEl) {
   return out;
 }
 
-// ─── PROCESS ──────────────────────────────────────────────
-function processPost(postEl) {
-  if (!isValidPost(postEl)) return;
+// ─── CLIENT-SIDE FRAME CAPTURE via captureVisibleTab ──────────────────
+// Facebook serves video from cross-origin CDNs, making canvas.drawImage
+// + toDataURL throw SecurityError (tainted canvas). Instead, we:
+//   1. Scroll the video into view
+//   2. Seek to each timestamp
+//   3. Ask the service worker to call chrome.tabs.captureVisibleTab()
+//   4. Crop the screenshot to the video's bounding rect on a canvas
+// This bypasses ALL CORS because captureVisibleTab captures composited
+// pixels, not DOM data.
 
-  const content = extractAll(postEl);
-  log("Post →", { platform: PLATFORM, text: !!content.text, img: !!content.imageUrl, vid: !!content.videoUrl });
+async function captureFramesFromLiveVideo(videoEl, nFrames = 8) {
+  // Make sure video is visible and playing
+  videoEl.scrollIntoView({ block: "center", behavior: "instant" });
+  await new Promise(r => setTimeout(r, 300));
 
-  const hasContentBtn = !CFG.mediaOnly && (content.text || content.imageUrl);
-  const hasMediaBtn   = content.imageUrl || content.videoUrl;
+  videoEl.muted = true;
+  const wasPlaying = !videoEl.paused;
 
-  if (!hasContentBtn && !hasMediaBtn) return;
+  // Try to start playback so data loads
+  try { await videoEl.play().catch(() => {}); } catch (_) {}
+  await new Promise(r => setTimeout(r, 500));
 
-  if (PLATFORM === "tiktok") {
-    postEl.setAttribute(PROCESSED_ATTR, content.videoUrl || "true");
+  const duration = videoEl.duration;
+  const hasDuration = isFinite(duration) && duration > 0;
+
+  const frames = [];
+
+  if (hasDuration) {
+    // Seek-based: spread frames across the duration
+    videoEl.pause();
+    const inset = Math.min(0.15 * duration, 0.5);
+    const timestamps = Array.from({ length: nFrames }, (_, i) =>
+      inset + i * (duration - 2 * inset) / (nFrames - 1)
+    );
+
+    for (const t of timestamps) {
+      await seekTo(videoEl, t);
+      await new Promise(r => setTimeout(r, 200)); // let the frame render
+
+      const frame = await captureVideoRect(videoEl);
+      if (frame) {
+        frames.push({ dataUrl: frame, timestamp: videoEl.currentTime });
+      }
+    }
+
+    if (wasPlaying) videoEl.play().catch(() => {});
   } else {
-    postEl.setAttribute(PROCESSED_ATTR, "true");
+    // Duration unknown (MSE/live) — capture as it plays, spaced out
+    if (videoEl.paused) {
+      try { await videoEl.play().catch(() => {}); } catch (_) {}
+    }
+    for (let i = 0; i < nFrames; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      const frame = await captureVideoRect(videoEl);
+      if (frame) {
+        frames.push({ dataUrl: frame, timestamp: videoEl.currentTime });
+      }
+    }
   }
 
-  const grp = document.createElement("div");
-  grp.className = "haqq-btn-group";
-  grp.setAttribute("data-haqq-owned", "true");  
-
-  if (hasContentBtn) grp.appendChild(makeBtn("content", postEl, content));
-  if (hasMediaBtn)   grp.appendChild(makeBtn("aimedia", postEl, content));
-
-  // Instagram/TikTok: buttons go INTO the native icon row/column,
-  // matching native icon format. Facebook: unchanged, buttons stay in
-  // the panel below the action row (no native-row insertion point was
-  // requested for Facebook).
-  const insertedNatively =
-    (PLATFORM === "instagram" || PLATFORM === "tiktok") &&
-    insertButtonsIntoActionColumn(postEl, grp);
-
-  if (!insertedNatively) {
-    const panel = getOrCreatePanel(postEl);
-    panel.appendChild(grp);
-  }
-
-  // Badge ALWAYS goes in the separate panel, regardless of where the
-  // buttons ended up — this is what guarantees it never overlaps any
-  // native icon, on any platform.
+  return frames;
 }
 
-// ─── TOOLBAR ──────────────────────────────────────────────
-function buildToolbar(postEl, content) {
-  const toolbar = document.createElement("div");
-  toolbar.className = "haqq-toolbar";
+// Capture a screenshot of the visible tab and crop to the video's rect
+async function captureVideoRect(videoEl) {
+  const rect = videoEl.getBoundingClientRect();
+  if (rect.width < 10 || rect.height < 10) return null;
 
-  const lbl = document.createElement("span");
-  lbl.className = "haqq-toolbar-lbl";
-  lbl.textContent = "🔍 حقّق";
-  toolbar.appendChild(lbl);
+  // Ask service worker to screenshot the tab
+  const screenshotDataUrl = await new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: "HAQQ_CAPTURE_TAB" },
+      (response) => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (!response || response.error) return reject(new Error(response?.error || "No response"));
+        resolve(response.dataUrl);
+      }
+    );
+  });
 
-  const grp = document.createElement("div");
-  grp.className = "haqq-btn-group";
+  // Crop to video rect
+  const dpr = window.devicePixelRatio || 1;
+  const cropX = rect.left * dpr;
+  const cropY = rect.top * dpr;
+  const cropW = rect.width * dpr;
+  const cropH = rect.height * dpr;
 
-  if (!CFG.mediaOnly && (content.text || content.imageUrl)) {
-    grp.appendChild(makeBtn("content", postEl, content));
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(cropW);
+      canvas.height = Math.round(cropH);
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img,
+        Math.round(cropX), Math.round(cropY), Math.round(cropW), Math.round(cropH),
+        0, 0, canvas.width, canvas.height
+      );
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => resolve(null);
+    img.src = screenshotDataUrl;
+  });
+}
+
+function seekTo(videoEl, t) {
+  return new Promise((resolve) => {
+    const onSeeked = () => { videoEl.removeEventListener("seeked", onSeeked); resolve(); };
+    videoEl.addEventListener("seeked", onSeeked);
+    videoEl.currentTime = t;
+    setTimeout(resolve, 3000); // fallback if seeked never fires
+  });
+}
+
+// Waits for the video to actually load REAL data (not just the poster)
+async function waitForRealVideoData(videoEl, timeoutMs = 8000) {
+  const isReady = () => videoEl.readyState >= 2;
+  if (isReady()) return true;
+
+  videoEl.muted = true;
+  try { await videoEl.play().catch(() => {}); } catch (_) {}
+
+  return new Promise((resolve) => {
+    if (isReady()) return resolve(true);
+    const onEvt = () => { if (isReady()) { cleanup(); resolve(true); } };
+    const cleanup = () => {
+      ["loadedmetadata", "loadeddata", "canplay", "durationchange", "playing"].forEach(
+        ev => videoEl.removeEventListener(ev, onEvt)
+      );
+    };
+    ["loadedmetadata", "loadeddata", "canplay", "durationchange", "playing"].forEach(
+      ev => videoEl.addEventListener(ev, onEvt)
+    );
+    setTimeout(() => { cleanup(); resolve(isReady()); }, timeoutMs);
+  });
+}
+
+// ─── VIDEO URL FALLBACK (used only when frame capture isn't possible) ─
+// Handles three layered problems, in order:
+//
+// STAGE 1 — the <video> element may not exist in the DOM yet at all
+// (Instagram grid tiles/Reels often render as just a thumbnail <img>
+// until interacted with).
+//
+// STAGE 2 — even once <video> exists, its .src may still be empty or
+// blob: until playback actually starts.
+//
+// STAGE 3 (grid-tile case) — if <video> NEVER appears even after
+// synthetic hover events, this is very likely because the tile's
+// hover-preview loader checks event.isTrusted, and script-dispatched
+// MouseEvents can never report as trusted — a hard browser guarantee.
+// In that case, fall back to the tile's own permalink link (its <a
+// href>), which points to the real post page — letting the backend
+// fetch the real video server-side even though no CDN URL was ever
+// obtainable client-side.
+async function getVideoUrlWithRetry(postEl, maxRetries = 6, delayMs = 350) {
+  const tileLink = postEl.querySelector("a") || postEl;
+
+  postEl.scrollIntoView({ block: "center", behavior: "instant" });
+  for (const eventType of ["mouseover", "mouseenter", "pointerenter", "pointerover"]) {
+    tileLink.dispatchEvent(new MouseEvent(eventType, { bubbles: true, cancelable: true }));
   }
-  if (content.imageUrl || content.videoUrl) {
-    grp.appendChild(makeBtn("aimedia", postEl, content));
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const vid = postEl.querySelector("video");
+
+    if (vid) {
+      const src = vid.src || vid.currentSrc || "";
+      if (src && !src.startsWith("blob:") && src.length > 10) {
+        log(`getVideoUrlWithRetry — real src found on attempt ${attempt + 1}`);
+        return { videoUrl: src, videoPoster: vid.getAttribute("poster") || null, foundVideoElement: true };
+      }
+      if (vid.paused) {
+        try {
+          vid.muted = true;
+          await vid.play().catch(() => {});
+        } catch (_) { /* some players block programmatic play */ }
+      }
+    } else {
+      log(`getVideoUrlWithRetry — no <video> element in DOM yet (attempt ${attempt + 1})`);
+      for (const eventType of ["mouseover", "mouseenter"]) {
+        tileLink.dispatchEvent(new MouseEvent(eventType, { bubbles: true, cancelable: true }));
+      }
+    }
+
+    if (attempt < maxRetries - 1) {
+      await new Promise(r => setTimeout(r, delayMs));
+    }
   }
 
-  toolbar.appendChild(grp);
-  return toolbar;
+  const vid = postEl.querySelector("video");
+
+  if (!vid) {
+    log(`getVideoUrlWithRetry — no <video> element ever appeared after ${maxRetries} attempts, even with synthetic hover — likely blocked by isTrusted. Falling back to permalink.`);
+
+    const linkEl = postEl.querySelector("a[href]");
+    if (linkEl) {
+      const href = linkEl.getAttribute("href") || "";
+      const isPostPermalink = /\/(p|reel|tv)\/[\w-]+/.test(href);
+      if (isPostPermalink) {
+        const absoluteUrl = new URL(href, location.origin).href;
+        log(`getVideoUrlWithRetry — found post permalink instead: ${absoluteUrl}`);
+        return { videoUrl: null, videoPoster: null, foundVideoElement: false, postPermalink: absoluteUrl };
+      }
+    }
+
+    return { videoUrl: null, videoPoster: null, foundVideoElement: false };
+  }
+
+  const poster = vid.getAttribute("poster") || null;
+  log(`getVideoUrlWithRetry — <video> exists but no real src after ${maxRetries} attempts, falling back to poster`);
+  return { videoUrl: poster, videoPoster: poster, foundVideoElement: true, usedPosterFallback: true };
 }
 
 // ─── ICONS (shield-check / robot, icon-only) ───────────────
@@ -326,6 +478,7 @@ const BTN_DEF = {
   aimedia: { label: ICON_AIMEDIA, title: "كشف الصور/الفيديوهات المولّدة أو المعدّلة بالذكاء الاصطناعي" },
 };
 
+// ─── BUTTON (single definition — content + aimedia, frame-capture-first) ──
 function makeBtn(type, postEl, content) {
   const def = BTN_DEF[type];
 
@@ -346,7 +499,7 @@ function makeBtn(type, postEl, content) {
   const setIdle = () => {
     btn.classList.remove("haqq-btn--loading", "haqq-btn--error");
     btn.innerHTML       = def.label;
-    btn.disabled        = false;
+    btn.disabled         = false;
     btn.dataset.loading = "false";
   };
 
@@ -372,12 +525,119 @@ function makeBtn(type, postEl, content) {
     try {
       const freshContent = extractAll(postEl);
 
-      const finalContent = {
+      let finalContent = {
         text:        freshContent.text        ?? content.text,
         imageUrl:    freshContent.imageUrl    ?? content.imageUrl,
         videoUrl:    freshContent.videoUrl    ?? content.videoUrl,
         videoPoster: freshContent.videoPoster ?? content.videoPoster,
       };
+
+      if (type === "aimedia") {
+        let frames = null;
+
+        // Step 1: Scroll the post into view to trigger Facebook's lazy video loading
+        postEl.scrollIntoView({ block: "center", behavior: "instant" });
+        await new Promise(r => setTimeout(r, 500));
+
+        // Step 2: Find the video element — it may not exist yet (lazy-loaded)
+        let vid = postEl.querySelector("video");
+        if (!vid) {
+          log("aimedia — no <video> in DOM yet, waiting up to 5s for lazy-load...");
+          // Try hovering/interacting to trigger lazy video insertion
+          const tileLink = postEl.querySelector("a") || postEl;
+          for (const ev of ["mouseover", "mouseenter", "pointerenter"]) {
+            tileLink.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true }));
+          }
+          // Also try clicking to trigger video player
+          try {
+            const playBtn = postEl.querySelector('[aria-label*="play" i], [aria-label*="Play" i], [role="button"]');
+            if (playBtn) playBtn.click();
+          } catch (_) {}
+
+          for (let i = 0; i < 10; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            vid = postEl.querySelector("video");
+            if (vid) {
+              log(`aimedia — <video> appeared after ${(i + 1) * 500}ms`);
+              break;
+            }
+          }
+        }
+
+        // Step 3: If we found a video element, try to capture frames from it
+        if (vid) {
+          log(`aimedia — found <video>, readyState=${vid.readyState}, duration=${vid.duration}, src=${(vid.src || "").slice(0, 60)}`);
+
+          // Try to get the video to start playing / loading data
+          vid.muted = true;
+          vid.scrollIntoView({ block: "center", behavior: "instant" });
+          try { await vid.play().catch(() => {}); } catch (_) {}
+
+          // Wait for video data, but don't give up if this fails
+          const ready = await waitForRealVideoData(vid, 10000);
+          log(`aimedia — waitForRealVideoData returned ${ready}, readyState=${vid.readyState}`);
+
+          // Attempt captureVisibleTab even if not "ready" — the video
+          // may be visually rendering frames via MSE even when readyState
+          // reports a low value.
+          try {
+            const captured = await captureFramesFromLiveVideo(vid, 8);
+            if (captured && captured.length > 0) {
+              frames = captured.map(f => f.dataUrl);
+              log(`aimedia — captured ${frames.length} frames via captureVisibleTab!`);
+            } else {
+              log("aimedia — captureFramesFromLiveVideo returned empty");
+            }
+          } catch (e) {
+            log("aimedia — frame capture failed:", e.message);
+            frames = null;
+          }
+        } else {
+          log("aimedia — no <video> element found even after waiting");
+        }
+
+        // Step 4: Build finalContent — either with frames or with fallback URL/permalink
+        if (frames && frames.length) {
+          finalContent = { ...finalContent, frames, videoUrl: null, postPermalink: null };
+        } else {
+          // Extract post permalink from the post element for backend fallback
+          let postPermalink = null;
+          const allLinks = postEl.querySelectorAll("a[href]");
+          for (const a of allLinks) {
+            const href = a.getAttribute("href") || "";
+            // Facebook video/post permalink patterns
+            if (/\/(watch|videos|reel|posts|permalink)\//.test(href) ||
+                /\/\d+\/?$/.test(href) ||
+                /story_fbid/.test(href)) {
+              postPermalink = new URL(href, location.origin).href;
+              break;
+            }
+          }
+
+          finalContent = {
+            ...finalContent,
+            postPermalink: postPermalink,
+          };
+
+          if (vid) {
+            const poster = vid.getAttribute("poster");
+            if (poster) finalContent.videoUrl = poster;
+          }
+
+          log("aimedia — no client-side frames, sending fallback:", {
+            hasPostPermalink: !!postPermalink,
+            hasVideoUrl: !!finalContent.videoUrl,
+          });
+        }
+
+        log("aimedia — sending:", {
+          hasFrames: !!(frames && frames.length),
+          numFrames: frames ? frames.length : 0,
+          hasVideoUrl: !!finalContent.videoUrl,
+          hasImageUrl: !!finalContent.imageUrl,
+          hasPostPermalink: !!finalContent.postPermalink,
+        });
+      }
 
       const result = await sendToBackground(type, finalContent);
       if (!result) throw new Error("لا استجابة من الخادم");
@@ -501,9 +761,12 @@ function runVerifyText(text) {
   });
 }
 
-// ─── AI-GENERATED / MANIPULATED MEDIA DETECTION ───────────
+// ─── AI-GENERATED / MANIPULATED MEDIA DETECTION (single definition) ───
+// frames (base64 data URLs captured client-side) takes priority on the
+// backend; videoUrl/postPermalink are the fallback path when capture
+// wasn't possible.
 async function verifyMedia(content) {
-  if (!content.imageUrl && !content.videoUrl) {
+  if (!content.imageUrl && !content.videoUrl && !content.postPermalink && !(content.frames && content.frames.length)) {
     return result("inconclusive", 0, "لا توجد صورة أو فيديو لتحليلها في هذا المنشور.", []);
   }
 
@@ -513,7 +776,7 @@ async function verifyMedia(content) {
   }
 
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 30000);
+    const t = setTimeout(() => reject(new Error("الخادم لا يستجيب")), 120000);
     try {
       chrome.runtime.sendMessage(
         {
@@ -521,6 +784,8 @@ async function verifyMedia(content) {
           payload: {
             imageUrl: content.imageUrl || null,
             videoUrl: content.videoUrl || null,
+            postPermalink: content.postPermalink || null,
+            frames: content.frames || null,
           },
         },
         (res) => {
@@ -547,8 +812,7 @@ async function verifyMedia(content) {
 // inserted into), then creates (or reuses) a single `.haqq-panel` div
 // as a sibling right after it. Both the toolbar and any later badge
 // live inside this one panel — guaranteeing the native
-// Like/Comment/Share row is never touched, regardless of how many
-// buttons/badges HAQQ ends up showing for this post.
+// Like/Comment/Share row is never touched.
 const FACEBOOK_ACTION_MARKERS = [
   '[data-ad-rendering-role="like_button"]',
   '[data-ad-rendering-role="comment_button"]',
@@ -749,6 +1013,7 @@ function normalise(str) {
     .replace(/\s+/g, " ")
     .trim();
 }
+
 // Inserts the HAQQ button(s) directly INTO the platform's own icon
 // row/column, sized to match its native icons — as opposed to
 // getOrCreatePanel(), which is used ONLY for the verdict badge and
@@ -769,6 +1034,49 @@ function insertButtonsIntoActionColumn(postEl, buttonGroup) {
   }
   return false;
 }
+
+// ─── PROCESS ──────────────────────────────────────────────
+function processPost(postEl) {
+  if (!isValidPost(postEl)) return;
+
+  const content = extractAll(postEl);
+  log("Post →", { platform: PLATFORM, text: !!content.text, img: !!content.imageUrl, vid: !!content.videoUrl });
+
+  const hasContentBtn = !CFG.mediaOnly && (content.text || content.imageUrl);
+  const hasMediaBtn   = content.imageUrl || content.videoUrl;
+
+  if (!hasContentBtn && !hasMediaBtn) return;
+
+  if (PLATFORM === "tiktok") {
+    postEl.setAttribute(PROCESSED_ATTR, content.videoUrl || "true");
+  } else {
+    postEl.setAttribute(PROCESSED_ATTR, "true");
+  }
+
+  const grp = document.createElement("div");
+  grp.className = "haqq-btn-group";
+  grp.setAttribute("data-haqq-owned", "true");
+
+  if (hasContentBtn) grp.appendChild(makeBtn("content", postEl, content));
+  if (hasMediaBtn)   grp.appendChild(makeBtn("aimedia", postEl, content));
+
+  // Instagram/TikTok: buttons go INTO the native icon row/column,
+  // matching native icon format. Facebook: unchanged, buttons stay in
+  // the panel below the action row.
+  const insertedNatively =
+    (PLATFORM === "instagram" || PLATFORM === "tiktok") &&
+    insertButtonsIntoActionColumn(postEl, grp);
+
+  if (!insertedNatively) {
+    const panel = getOrCreatePanel(postEl);
+    panel.appendChild(grp);
+  }
+
+  // Badge ALWAYS goes in the separate panel, regardless of where the
+  // buttons ended up — this is what guarantees it never overlaps any
+  // native icon, on any platform.
+}
+
 // ─── SCAN + OBSERVER ──────────────────────────────────────
 function scanForPosts() {
   if (!isContextValid()) { killIfContextInvalid(); return; }
@@ -806,7 +1114,7 @@ history.pushState = function (...a) { _push(...a); handleNav(); };
 window.addEventListener("popstate", handleNav);
 
 function init() {
-  log(`HAQQ v16 init — platform: ${PLATFORM}, mediaOnly: ${CFG.mediaOnly}`);
+  log(`HAQQ v17 init — platform: ${PLATFORM}, mediaOnly: ${CFG.mediaOnly}`);
   scanForPosts();
   [800, 2000, 4000, 7000].forEach(t => setTimeout(scanForPosts, t));
   observer.observe(document.body, { childList: true, subtree: true, attributes: false });
@@ -816,3 +1124,5 @@ function init() {
 document.readyState === "loading"
   ? document.addEventListener("DOMContentLoaded", init)
   : init();
+
+})();
