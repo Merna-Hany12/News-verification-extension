@@ -100,6 +100,8 @@ const PLATFORM_CONFIG = {
       'div[data-pagelet^="FeedUnit"]',
       'div[data-pagelet^="PermalinkPost"]',
       'div[data-pagelet^="GroupsFeed"]',
+      'div[role="article"]',
+      'div[data-testid="fbfeed_story"]',
     ].join(", "),
     seeMoreLabels: ["See more", "اقرأ المزيد", "See More"],
     toolbarAnchorSelectors: [
@@ -205,7 +207,7 @@ function extractAll(postEl) {
     if (!out.text) {
       for (const b of postEl.querySelectorAll('[dir="auto"]')) {
         const t = b.textContent?.trim().replace(/\n+/g, " ");
-        if (t && t.length > 30) { out.text = t.slice(0, 3000); break; }
+        if (t && t.length > 10) { out.text = t.slice(0, 3000); break; }
       }
     }
   }
@@ -214,9 +216,10 @@ function extractAll(postEl) {
   if (vid) {
     const src    = vid.src || vid.currentSrc || "";
     const poster = vid.getAttribute("poster") || "";
-    if (src && !src.startsWith("blob:") && src.length > 10) out.videoUrl = src;
+    if (src && src.length > 10) out.videoUrl = src;
     if (poster) out.videoPoster = poster;
     if (!out.videoUrl && poster) out.videoUrl = poster;
+    if (!out.videoUrl) out.videoUrl = "video";
     log("Video — src:", src.slice(0, 60), "| poster:", poster.slice(0, 60));
   }
 
@@ -228,7 +231,8 @@ function extractAll(postEl) {
     if (out.videoPoster && src === out.videoPoster) continue;
     const w = img.naturalWidth  || img.width  || img.offsetWidth  || 0;
     const h = img.naturalHeight || img.height || img.offsetHeight || 0;
-    if (w < 100 || h < 80) continue;
+    const isPendingLoad = (!img.complete && img.complete !== undefined) || (img.naturalWidth === 0 && img.naturalHeight === 0);
+    if (!isPendingLoad && (w < 100 || h < 80)) continue;
     out.imageUrl = src;
     break;
   }
@@ -298,6 +302,9 @@ async function captureFramesFromLiveVideo(videoEl, nFrames = 8) {
 
   return frames;
 }
+  const grp = document.createElement("div");
+  grp.className = "haqq-btn-group";
+  grp.setAttribute("data-haqq-owned", "true");
 
 // Capture a screenshot of the visible tab and crop to the video's rect
 async function captureVideoRect(videoEl) {
@@ -371,6 +378,20 @@ async function waitForRealVideoData(videoEl, timeoutMs = 8000) {
     );
     setTimeout(() => { cleanup(); resolve(isReady()); }, timeoutMs);
   });
+  if (PLATFORM === "instagram" || PLATFORM === "tiktok") {
+    const insertedNatively = insertButtonsIntoActionColumn(postEl, grp);
+    if (!insertedNatively) {
+      const panel = getOrCreatePanel(postEl);
+      panel.insertBefore(grp, panel.firstChild);
+    }
+  } else {
+    // Facebook (and any other platform): always insert a panel block below
+    // the action row — works for both labeled and compact icon-only layouts.
+    const panel = getOrCreatePanel(postEl);
+    if (!panel.querySelector(":scope > .haqq-btn-group")) {
+      panel.insertBefore(grp, panel.firstChild);
+    }
+  }
 }
 
 // ─── VIDEO URL FALLBACK (used only when frame capture isn't possible) ─
@@ -822,29 +843,99 @@ const FACEBOOK_ACTION_MARKERS = [
   '[aria-label^="React with Like to"]',
 ];
 
-function isFacebookActionRow(node) {
-  if (!node.children || node.children.length < 2) return false;
-  let hits = 0;
-  for (const child of node.children) {
-    const isHit = FACEBOOK_ACTION_MARKERS.some(
-      (sel) => child.matches?.(sel) || child.querySelector?.(sel)
-    );
-    if (isHit) hits++;
-    if (hits >= 2) return true;
+// ─── FACEBOOK ANCHOR FINDERS ──────────────────────────────
+// Layout 1: posts with text buttons (Like / Comment / Share)
+// Returns the first labeled interactive element found, or null.
+function findFacebookLabeledAnchor(postEl) {
+  const roleSelectors = [
+    '[data-ad-rendering-role="share_button"]',
+    '[data-ad-rendering-role="comment_button"]',
+    '[data-ad-rendering-role="like_button"]',
+  ];
+  for (const sel of roleSelectors) {
+    const el = postEl.querySelector(sel);
+    if (el) return el;
   }
-  return false;
+  const ariaSelectors = [
+    '[aria-label*="Share"]', '[aria-label*="share"]', '[aria-label*="مشاركة"]', '[aria-label*="إرسال"]',
+    '[aria-label*="Comment"]', '[aria-label*="comment"]', '[aria-label*="تعليق"]', '[aria-label*="التعليق"]',
+    '[aria-label*="Like"]', '[aria-label*="like"]', '[aria-label*="إعجاب"]', '[aria-label*="أعجبني"]', '[aria-label*="تفاعل"]',
+    '[aria-label="Send this to friends or post it on your profile."]',
+    '[role="button"][aria-label*="Message"]', '[role="button"][aria-label*="رسالة"]',
+    '[role="button"][aria-label*="Send message"]', '[role="button"][aria-label*="أرسل رسالة"]',
+  ];
+  for (const sel of ariaSelectors) {
+    const el = postEl.querySelector(sel);
+    if (el) return el;
+  }
+  return null;
 }
 
-function findFacebookActionRow(postEl) {
-  for (const sel of CFG.toolbarAnchorSelectors) {
-    const anchorEl = postEl.querySelector(sel);
-    if (!anchorEl) continue;
-    let node = anchorEl.parentElement;
+// Layout 2: compact icon-only row (👍 128  💬 64  ↗ 12 — no aria-labels)
+// Returns the flex container that holds the icon+number pairs, or null.
+// This layout has SVG icons paired with plain number text nodes — unlike
+// Layout 1 which has role="button" children with visible text labels.
+function findFacebookCompactIconRow(postEl) {
+  const allEls = postEl.querySelectorAll('div, span');
+  for (const el of allEls) {
+    // Skip anything that already contains our own elements.
+    if (el.querySelector('.haqq-panel, .haqq-btn-group')) continue;
+    // Skip if this contains role=button children — that's Layout 1's action row.
+    if (el.querySelector('[role="button"]')) continue;
+    const style = window.getComputedStyle(el);
+    if (style.display !== 'flex') continue;
+    // Needs at least 2 SVGs (like + comment icons at minimum).
+    const svgs = el.querySelectorAll('svg');
+    if (svgs.length < 2) continue;
+    const rect = el.getBoundingClientRect();
+    // Compact row is short (icon height ~20px, with padding ~30-50px total).
+    if (rect.height > 60 || rect.height < 10) continue;
+    // Must be reasonably wide (at least 3 icon+number pairs = ~80px).
+    if (rect.width < 80) continue;
+    // Confirm this looks like the stats row: at least one SVG should have a
+    // sibling or nearby text node that looks like a number (reaction count).
+    const hasNumberSibling = Array.from(el.querySelectorAll('svg')).some(svg => {
+      // Check text content of the direct SVG parent and its neighbors.
+      const parent = svg.parentElement;
+      if (!parent) return false;
+      const txt = parent.textContent?.trim() || '';
+      return /\d/.test(txt) && txt.length < 10;
+    });
+    // Also accept if the element's direct text nodes contain numbers
+    // (some FB versions render: <svg/>70 <svg/>86 <svg/>7 directly).
+    const directText = Array.from(el.childNodes)
+      .filter(n => n.nodeType === Node.TEXT_NODE)
+      .map(n => n.textContent?.trim())
+      .join('');
+    const hasInlineNumbers = /\d/.test(directText);
+    if (!hasNumberSibling && !hasInlineNumbers) continue;
+    return el;
+  }
+  return null;
+}
+
+// Find the action row for either layout, for panel insertion below it.
+// Returns { row, layout } where layout is 1 (labeled) or 2 (compact).
+function findFacebookActionBarRow(postEl) {
+  // --- Layout 1: labeled buttons (Like / Comment / Share) ---
+  const labeledAnchor = findFacebookLabeledAnchor(postEl);
+  if (labeledAnchor) {
+    let node = labeledAnchor.parentElement;
     for (let i = 0; i < 8 && node && node !== postEl; i++) {
-      if (isFacebookActionRow(node)) return node;
+      const s = window.getComputedStyle(node);
+      if (s.display === 'flex' && (s.flexDirection === 'row' || s.flexDirection === 'row-reverse' || !s.flexDirection)) {
+        const rect = node.getBoundingClientRect();
+        if (rect.height < 80) return { row: node, layout: 1 };
+      }
       node = node.parentElement;
     }
+    return { row: labeledAnchor.parentElement || labeledAnchor, layout: 1 };
   }
+
+  // --- Layout 2: compact icon-only row (no aria-labels) ---
+  const compactRow = findFacebookCompactIconRow(postEl);
+  if (compactRow) return { row: compactRow, layout: 2 };
+
   return null;
 }
 
@@ -865,23 +956,41 @@ function getOrCreatePanel(postEl) {
   panel.className = "haqq-panel";
   panel.setAttribute("data-haqq-owned", "true");
 
-  let reference = null;
   if (PLATFORM === "facebook") {
-    reference = findFacebookActionRow(postEl);
+    const found = findFacebookActionBarRow(postEl);
+    if (found) {
+      const { row } = found;
+
+      // Walk up from the found action row until we reach a node whose
+      // DIRECT PARENT is postEl. That node is guaranteed to be a top-level
+      // section of the post card (header / body / action bar / comments).
+      // Inserting the panel after it keeps us safely inside the post card
+      // regardless of how deeply nested flex containers Facebook uses.
+      let child = row;
+      while (child.parentElement && child.parentElement !== postEl) {
+        child = child.parentElement;
+      }
+
+      if (child.parentElement === postEl) {
+        postEl.insertBefore(panel, child.nextSibling);
+        log(`Panel inserted after postEl direct child containing action row (facebook)`);
+        return panel;
+      }
+    }
   } else {
-    reference = findInstaTikTokReference(postEl);
+    const reference = findInstaTikTokReference(postEl);
+    if (reference && reference.parentElement) {
+      reference.parentElement.insertBefore(panel, reference.nextSibling);
+      log(`Panel inserted after native action row (${PLATFORM})`);
+      return panel;
+    }
   }
 
-  if (reference && reference.parentElement) {
-    reference.parentElement.insertBefore(panel, reference.nextSibling);
-    log(`Panel inserted after native action row (${PLATFORM})`);
-  } else {
-    postEl.appendChild(panel);
-    log(`No action-row reference found — panel appended to postEl (${PLATFORM})`);
-  }
-
+  postEl.appendChild(panel);
+  log(`Fallback: Badge panel appended to postEl (${PLATFORM})`);
   return panel;
 }
+
 
 // ─── NON-NEWS BADGE ───────────────────────────────────────
 function showNonNews(postEl, btn, type) {
@@ -1097,10 +1206,24 @@ function scanForPosts() {
 
 let scanTimer = null;
 let scanInterval = null;
-const observer = new MutationObserver(() => {
+let lastScanTime = 0;
+
+function requestScan() {
+  const now = Date.now();
+  if (now - lastScanTime > 500) {
+    clearTimeout(scanTimer);
+    lastScanTime = now;
+    scanForPosts();
+    return;
+  }
   clearTimeout(scanTimer);
-  scanTimer = setTimeout(scanForPosts, 120);
-});
+  scanTimer = setTimeout(() => {
+    lastScanTime = Date.now();
+    scanForPosts();
+  }, 300);
+}
+
+const observer = new MutationObserver(requestScan);
 
 let lastUrl = location.href;
 function handleNav() {

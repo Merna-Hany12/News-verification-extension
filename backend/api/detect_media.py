@@ -17,6 +17,8 @@ from playwright.async_api import async_playwright
 
 from backend.api.schemas import DetectMediaRequest
 
+from io import BytesIO
+
 router = APIRouter()
 
 DOWNLOAD_HEADERS = {

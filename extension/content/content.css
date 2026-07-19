@@ -52,6 +52,7 @@
 
 /* ── Global sizing fixes (from v5/v6) ── */
 .haqq-toolbar,
+.haqq-panel,
 .haqq-badge,
 .haqq-badge-bar,
 .haqq-badge-right,
@@ -60,35 +61,26 @@
   max-width: 100% !important;
 }
 
-.haqq-badge-verdict,
-.haqq-badge-typename,
-.haqq-badge-right {
-  min-width: 0 !important;
-}
-
-.haqq-badge {
+.haqq-panel {
+  display: flex !important;
+  flex-direction: column !important;
   width: 100% !important;
-  min-width: 0 !important;
   max-width: 100% !important;
-}
-
-/* ── Toolbar — still inserts as a sibling inside the platform's own
-   icon row (content.js's insertToolbar). display:contents means the
-   toolbar wrapper itself takes up no layout space of its own — its
-   children (the button(s)) sit directly as flex items in that row. ── */
-.haqq-toolbar {
-  display: contents !important;
-}
-
-/* Toolbar-wide label ("🔍 حقّق") stays hidden — icon-only buttons have
-   no room for a header label either. Toggle this back on if you want
-   it visible above/beside the buttons instead. */
-.haqq-toolbar-lbl {
-  display: none !important;
+  box-sizing: border-box !important;
+  position: static !important;
+  margin: 4px 0 4px !important;
+  padding: 0 12px !important;
+  clear: both !important;
 }
 
 .haqq-btn-group {
-  display: contents !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  margin-bottom: 4px !important;
+  flex-wrap: wrap !important;
+  width: 100% !important;
 }
 
 /* ── Buttons — icon-only again, transparent, sized to match a
