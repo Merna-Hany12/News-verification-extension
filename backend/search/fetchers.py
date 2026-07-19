@@ -237,3 +237,79 @@ async def fetch_article_body(client: httpx.AsyncClient, url: str) -> str:
     except Exception as exc:
         print(f"[HAQQ] body fetch failed {url[:60]}: {exc}")
         return ""
+
+
+async def _fetch_pubmed(client: httpx.AsyncClient, query: str, lang: str) -> list[dict]:
+    """
+    PubMed E-utilities search — free, no API key required (3 req/sec rate limit).
+
+    Two-step process:
+      1. ESearch: find PubMed IDs matching the query
+      2. ESummary: get title, journal, publication date for those IDs
+
+    Best for: medical/health claims — PubMed indexes peer-reviewed biomedical
+    literature, systematic reviews, and clinical guidelines.
+    """
+    # Step 1: search for matching article IDs
+    search_data = await _get_json(
+        client,
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+        db="pubmed",
+        term=query[:200],
+        retmode="json",
+        retmax=8,
+        sort="relevance",
+    )
+    id_list = (search_data.get("esearchresult") or {}).get("idlist", [])
+    if not id_list:
+        print("[HAQQ] PubMed → 0 results")
+        return []
+
+    # Small delay to respect NCBI rate limits (3 req/sec without API key)
+    await asyncio.sleep(0.35)
+
+    # Step 2: fetch summaries for those IDs
+    ids_str = ",".join(id_list)
+    summary_data = await _get_json(
+        client,
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+        db="pubmed",
+        id=ids_str,
+        retmode="json",
+    )
+    result_block = summary_data.get("result", {})
+    uids = result_block.get("uids", [])
+
+    articles: list[dict] = []
+    for uid in uids:
+        entry = result_block.get(uid)
+        if not entry or isinstance(entry, str):
+            continue
+
+        title = entry.get("title", "").strip()
+        journal = entry.get("fulljournalname", "") or entry.get("source", "")
+        pubdate = entry.get("pubdate", "")
+
+        # Build a description from available metadata
+        authors = entry.get("sortfirstauthor", "")
+        desc_parts = []
+        if authors:
+            desc_parts.append(authors)
+        if journal:
+            desc_parts.append(journal)
+        if pubdate:
+            desc_parts.append(pubdate)
+        description = " — ".join(desc_parts)
+
+        articles.append({
+            "title":       title,
+            "description": description,
+            "link":        f"https://pubmed.ncbi.nlm.nih.gov/{uid}/",
+            "source_id":   "pubmed",
+            "source_name": f"PubMed ({journal})" if journal else "PubMed",
+            "_api":        "pubmed",
+        })
+
+    print(f"[HAQQ] PubMed → {len(articles)} results")
+    return articles
+

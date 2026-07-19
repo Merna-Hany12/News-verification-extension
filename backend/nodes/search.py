@@ -18,6 +18,7 @@ from backend.search.fetchers import (
     _fetch_newsdata,
     _fetch_currents,
     _fetch_gnews,
+    _fetch_pubmed,
     fetch_article_body,
 )
 
@@ -100,7 +101,18 @@ async def search_node(state: HAQQState) -> HAQQState:
 
     async with httpx.AsyncClient() as client:
 
-        if content_type == "historical_scientific":
+        if content_type == "medical":
+            # ── Medical path ─────────────────────────────────────────────────
+            # PubMed for peer-reviewed literature; DDG for WHO/CDC/Mayo;
+            # Google RSS for recent medical news coverage.
+            print("[HAQQ graph] search path → medical (PubMed + DDG + Google RSS)")
+            results = await asyncio.gather(
+                _fetch_pubmed(client, search_q, lang),
+                _fetch_duckduckgo(client, search_q, lang),
+                _fetch_google_rss(client, search_q, lang),
+            )
+
+        elif content_type == "historical_scientific":
             # ── Historical / scientific path ──────────────────────────────────
             # DuckDuckGo is excellent for encyclopedic content; Google RSS adds
             # journalistic coverage of the same topic.
