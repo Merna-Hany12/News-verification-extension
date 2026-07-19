@@ -1,11 +1,28 @@
-// ─── HAQQ Background Service Worker v10 (LangGraph backend) ─────────────────
-// All search, scoring, and keyword extraction has moved to the Python
-// LangGraph pipeline (/verify).  This file is now only responsible for:
+// ─── HAQQ Background Service Worker v12 ──────────────────────────────────────
+// v12 change: added a single HAQQ_VERIFY_CONTENT handler that calls the new
+// backend endpoint /verify-content, which now owns the whole "verify text ->
+// maybe OCR -> maybe re-verify" decision server-side. This replaces what used
+// to be up to 3 separate chrome.runtime round trips (HAQQ_VERIFY_TEXT ->
+// HAQQ_OCR_IMAGE -> HAQQ_VERIFY_TEXT again) from content.js's old client-side
+// orchestration with a single request/response.
+//
+// HAQQ_VERIFY_TEXT and HAQQ_OCR_IMAGE are KEPT (not removed) since other
+// flows may still call them directly — only content.js's merged "content"
+// button flow has moved to HAQQ_VERIFY_CONTENT. Safe to delete the two old
+// handlers later once confirmed nothing else sends those message types.
+//
+// v11 change (carried over): the old HAQQ_VERIFY_IMAGE / HAQQ_VERIFY_VIDEO
+// handlers (which only ever did a keyword-from-URL guess) are replaced with
+// a single HAQQ_DETECT_MEDIA handler that calls the real GPU-accelerated
+// AI-media detection pipeline for both images and video.
+//
+// Responsibilities of this file:
 //   • routing chrome messages
-//   • calling /verify  (text)
-//   • calling /ocr     (image → text → /verify)
-//   • calling /classify (direct AI classification badge)
-//   • image/video verification via keywordsFromUrl (no backend needed)
+//   • calling /verify-content (merged text+OCR verification — "content" btn)
+//   • calling /verify         (text only — kept for any other caller)
+//   • calling /ocr            (image → text — kept for any other caller)
+//   • calling /classify       (direct AI news/non-news classification badge)
+//   • calling /detect-media   (GPU AI-generated / manipulated media detection)
 //   • stats tracking
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -18,21 +35,25 @@ const cache    = new Map();
 const inFlight = new Map();
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
-let stats = { total: 0, fact: 0, unverified: 0, fake: 0, ai_generated: 0 };
+let stats = {
+  total: 0,
+  fact: 0, unverified: 0, fake: 0,
+  ai_generated: 0, manipulated: 0, real: 0, inconclusive: 0,
+};
 
 // ─── ROUTER ───────────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     try {
       switch (msg.type) {
+        case "HAQQ_VERIFY_CONTENT":
+          return sendResponse({ data: await verifyContentBackend(msg.payload) });
+
         case "HAQQ_VERIFY_TEXT":
           return sendResponse({ data: await verifyText(msg.payload) });
 
-        case "HAQQ_VERIFY_IMAGE":
-          return sendResponse({ data: await verifyImage(msg.payload) });
-
-        case "HAQQ_VERIFY_VIDEO":
-          return sendResponse({ data: await verifyVideo(msg.payload) });
+        case "HAQQ_DETECT_MEDIA":
+          return sendResponse({ data: await detectMedia(msg.payload) });
 
         case "HAQQ_OCR_IMAGE":
           return sendResponse({ data: await ocrImage(msg.payload) });
@@ -44,7 +65,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           return sendResponse({ data: { stats } });
 
         case "HAQQ_RESET_STATS":
-          stats = { total: 0, fact: 0, unverified: 0, fake: 0, ai_generated: 0 };
+          stats = {
+            total: 0,
+            fact: 0, unverified: 0, fake: 0,
+            ai_generated: 0, manipulated: 0, real: 0, inconclusive: 0,
+          };
           return sendResponse({ data: { ok: true } });
 
         default:
@@ -57,9 +82,59 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true;
 });
 
-// ─── TEXT VERIFICATION ────────────────────────────────────────────────────────
+// ─── MERGED CONTENT VERIFICATION (text + OCR fallback, server-side) ──────────
+// Replaces what used to be up to 3 separate chrome.runtime round trips
+// (verify text -> ocr -> verify ocr text) with a single call to the
+// backend's /verify-content, which now owns that whole decision itself —
+// including firing OCR concurrently with text verification, and retrying
+// with OCR text when the direct-text verdict comes back "unverified" or
+// "non_news".
+async function verifyContentBackend({ text, imageUrl, lang }) {
+  const cKey = "content::" + (text || "").trim().slice(0, 100) + "::" + (imageUrl || "");
+  if (cache.has(cKey))    return cache.get(cKey);
+  if (inFlight.has(cKey)) return inFlight.get(cKey);
+
+  const promise = (async () => {
+    try {
+      const res = await fetch(`${NGROK_URL}/verify-content`, {
+        method:  "POST",
+        headers: {
+          "Content-Type":               "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify({
+          text:      (text || "").trim().slice(0, 1000),
+          image_url: imageUrl || null,
+          lang,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const out = await res.json();   // { verdict, confidence, explanation, sources, text_source }
+
+      cache.set(cKey, out);
+      inFlight.delete(cKey);
+      stats.total++;
+      stats[out.verdict] = (stats[out.verdict] || 0) + 1;
+      return out;
+
+    } catch (e) {
+      console.warn("[HAQQ] /verify-content error:", e.message);
+      inFlight.delete(cKey);
+      return result("unverified", 0, "⚠️ خطأ في الاتصال بخادم التحقق", []);
+    }
+  })();
+
+  inFlight.set(cKey, promise);
+  return promise;
+}
+
+// ─── TEXT VERIFICATION (text only, no OCR) ────────────────────────────────────
 // Delegates entirely to the LangGraph /verify pipeline on the backend.
 // Pipeline: classify → extract keywords → search → LLM verify → score
+// Kept for any caller that wants text-only verification without the
+// merged OCR-fallback behavior /verify-content now provides.
 async function verifyText({ text, lang }) {
   if (!text || text.trim().length < 20)
     return result("unverified", 0, "النص قصير جداً للتحقق.", []);
@@ -100,29 +175,56 @@ async function verifyText({ text, lang }) {
   return promise;
 }
 
-// ─── IMAGE VERIFICATION ───────────────────────────────────────────────────────
-// Extracts keywords from the image URL and pipes them through verifyText.
-// If the URL yields no useful keywords, returns unverified immediately.
-async function verifyImage({ imageUrl }) {
-  const keywords = keywordsFromUrl(imageUrl);
-  if (!keywords)
-    return result("unverified", 0.3, "لا يمكن استخراج معلومات من رابط الصورة", []);
+// ─── AI-GENERATED / MANIPULATED MEDIA DETECTION ───────────────────────────────
+// Sends whichever of imageUrl / videoUrl are present to the backend's
+// GPU-accelerated detection ensemble (/detect-media). The backend decides
+// internally how to weight image vs. video when both are supplied (e.g. a
+// video's poster frame plus the video itself).
+// Expected response shape: { verdict, confidence, explanation, mediaType }
+// where verdict is one of: real | ai_generated | manipulated | inconclusive
+async function detectMedia({ imageUrl, videoUrl }) {
+  if (!imageUrl && !videoUrl)
+    return result("inconclusive", 0, "لا توجد وسائط لتحليلها.", []);
 
-  // Reuse the text pipeline — keywords become the "text" to verify
-  return verifyText({ text: keywords, lang: "ar" });
+  const cKey = "media::" + (videoUrl || imageUrl);
+  if (cache.has(cKey))    return cache.get(cKey);
+  if (inFlight.has(cKey)) return inFlight.get(cKey);
+
+  const promise = (async () => {
+    try {
+      const res = await fetch(`${NGROK_URL}/detect-media`, {
+        method:  "POST",
+        headers: {
+          "Content-Type":               "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify({ image_url: imageUrl || null, video_url: videoUrl || null }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const out = await res.json();
+
+      cache.set(cKey, out);
+      inFlight.delete(cKey);
+      stats.total++;
+      stats[out.verdict] = (stats[out.verdict] || 0) + 1;
+      return out;
+
+    } catch (e) {
+      console.warn("[HAQQ] /detect-media error:", e.message);
+      inFlight.delete(cKey);
+      return result("inconclusive", 0, "⚠️ خطأ في الاتصال بخادم كشف الوسائط", []);
+    }
+  })();
+
+  inFlight.set(cKey, promise);
+  return promise;
 }
 
-// ─── VIDEO VERIFICATION ───────────────────────────────────────────────────────
-async function verifyVideo({ text, videoPoster, videoUrl }) {
-  if (text && text.trim().length > 15) return verifyText({ text, lang: "ar" });
-  if (videoPoster) return verifyImage({ imageUrl: videoPoster });
-  if (videoUrl)    return verifyImage({ imageUrl: videoUrl });
-  return result("unverified", 0.2, "⚠️ الفيديو يحتاج وصفاً نصياً للتحقق", []);
-}
-
-// ─── OCR ──────────────────────────────────────────────────────────────────────
-// Sends image URL to /ocr, gets back extracted text, then pipes it through
-// verifyText so the full LangGraph pipeline runs on the extracted text.
+// ─── OCR (standalone, no verification) ────────────────────────────────────────
+// Sends image URL to /ocr, gets back extracted text. Kept for any caller
+// that wants raw OCR text without the merged verify-content flow.
 async function ocrImage({ imageUrl }) {
   if (!imageUrl) {
     console.warn("[HAQQ] ocrImage — no imageUrl provided");
@@ -196,21 +298,6 @@ async function classifyWithAI(text) {
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-// Extracts readable keywords from an image URL path.
-// Used by verifyImage when there's no text caption to work with.
-function keywordsFromUrl(url) {
-  try {
-    return new URL(url).pathname
-      .split("/")
-      .map(p => p.replace(/[-_.]/g, " ").trim())
-      .filter(p => p.length > 4 && !/^\d+$/.test(p))
-      .slice(0, 3)
-      .join(" ") || null;
-  } catch {
-    return null;
-  }
-}
 
 // Uniform result shape — matches what the backend also returns.
 function result(verdict, confidence, explanation, sources = []) {

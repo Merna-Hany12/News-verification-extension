@@ -15,9 +15,9 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY",     "")
 GROQ_MODEL   = os.environ.get("GROQ_MODEL",       "llama-3.3-70b-versatile")
 
 # How many chars of article body to pass to the LLM per article
-BODY_CHARS_PER_ARTICLE = 800
+BODY_CHARS_PER_ARTICLE = 500
 # How many articles to actually fetch the body for (costs time)
-BODY_FETCH_TOP_N = 3
+BODY_FETCH_TOP_N = 2
 
 # Query character limits
 API_QUERY_LIMIT    = 95
@@ -55,8 +55,30 @@ TRUSTED: set[str] = {
     "almasryalyoum", "shorouk", "elshorouk", "vetogate",
     "filbalad", "mobtada", "dotmsr", "elbashayer", "cairo24",
     "sis", "egypttoday", "dailynewsegypt", "ahramonline",
+    #sports
+    "fifa",
+}
+
+# ─── MEDICAL TRUSTED SOURCES ─────────────────────────────────────────────────
+MEDICAL_TRUSTED: set[str] = {
+    # Government / institutional
+    "who", "cdc", "nih", "ncbi", "pubmed", "medlineplus", "fda",
+    "ema", "nhs", "mhra",
+
+    # Peer-reviewed journals
+    "thelancet", "nejm", "bmj", "jama", "nature", "sciencedirect",
+    "cochrane", "pubmed", "ncbi", "plos", "frontiersin",
+
+    # Trusted medical info sites
+    "mayoclinic", "clevelandclinic", "hopkinsmedicine", "webmd",
+    "healthline", "medscape", "uptodate", "drugs.com",
+
+    # Arabic medical
+    "webteb", "altibbi", "dailymedicalinfo", "sehatok",
 }
 # Labels for the three-class zero-shot classifier
+# NOTE: Medical detection is handled separately via keyword matching (MEDICAL_KEYWORDS)
+# because the zero-shot model can't reliably separate "medical" from "historical/scientific".
 CLASSIFY_LABELS = [
     # class 0 — news
     "breaking news report journalism media coverage current event announcement politics",
@@ -72,3 +94,51 @@ LABEL_TO_TYPE = {
     1: "historical_scientific",
     2: "non_news",
 }
+
+# ─── MEDICAL KEYWORD DETECTION ──────────────────────────────────────────────────
+# Used as a secondary check after zero-shot classification.
+# If enough medical keywords are found, content_type is overridden to "medical".
+MEDICAL_KEYWORDS_EN: set[str] = {
+    # Diseases & conditions
+    "cancer", "diabetes", "disease", "infection", "syndrome", "disorder",
+    "tumor", "stroke", "asthma", "allergy", "arthritis", "pneumonia",
+    "flu", "influenza", "covid", "coronavirus", "hiv", "aids", "malaria",
+    "cholesterol", "hypertension", "obesity", "anemia", "dementia",
+    "alzheimer", "parkinson", "epilepsy", "hepatitis",
+    # Treatments & medicine
+    "treatment", "therapy", "drug", "medication", "antibiotic", "vaccine",
+    "surgery", "prescription", "dose", "dosage", "pill", "injection",
+    "chemotherapy", "radiation", "transplant", "clinical",
+    # Body & health
+    "symptom", "diagnosis", "patient", "doctor", "hospital", "medical",
+    "health", "cure", "healing", "medicine", "pharmaceutical",
+    "blood", "heart", "lung", "liver", "kidney", "brain",
+    "immune", "immunity", "vitamin", "protein", "nutrition",
+    # Actions
+    "smoking", "drinking", "exercise", "diet", "fasting",
+    "prevent", "prevention", "causes", "risk", "side effect",
+    "bleach", "toxic", "poison", "overdose", "fatal",
+}
+
+MEDICAL_KEYWORDS_AR: set[str] = {
+    # أمراض وحالات
+    "سرطان", "مرض", "عدوى", "إصابة", "التهاب", "فيروس",
+    "كورونا", "السكري", "ضغط", "قلب", "رئة", "كبد",
+    "كلى", "الزهايمر", "جلطة", "سكتة", "ربو", "حساسية",
+    "انفلونزا", "إيدز", "ملاريا", "ورم", "أورام",
+    # علاج وأدوية
+    "علاج", "دواء", "مضاد", "لقاح", "عملية", "جراحة",
+    "أشعة", "كيماوي", "جرعة", "حقنة", "دوائي",
+    # صحة وجسم
+    "طبي", "مريض", "مستشفى", "صحة", "صحي",
+    "فيتامين", "تغذية", "مناعة", "أعراض", "تشخيص",
+    "دم", "مخ", "عظام", "أعصاب",
+    # سلوكيات
+    "تدخين", "سجائر", "رياضة", "حمية", "صيام",
+    "وقاية", "خطر", "سموم", "تسمم",
+    # كلمات مفتاحية
+    "يعالج", "يسبب", "يشفي", "يقي", "يمنع",
+}
+
+# Minimum number of medical keywords required to classify as medical
+MEDICAL_KEYWORD_THRESHOLD = 2

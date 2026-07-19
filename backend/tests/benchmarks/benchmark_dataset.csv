@@ -1,24 +1,49 @@
 text,lang,expected_verdict
+England lose World Cup 2026 semifinal to Argentina after late comeback,en,fact
+US carries out fifth consecutive day of strikes on Tehran and other Iranian targets,en,fact
+US-mediated talks in Rome move toward Israel-Lebanon military pilot zones,en,fact
+Israeli forces kill four people in Gaza including a 6-year-old girl,en,fact
+TSMC raises spending outlook after strong earnings guidance,en,fact
+100-plus House Democrats vote to cut military aid to Israel,en,fact
+EU mandates driver distraction detection systems in all newly registered cars,en,fact
+Mistral releases Leanstral 1.5 with formal software verification via Lean 4,en,fact
+OpenAI's Deployment Company acquires applied-AI firm Northslope,en,fact
+Google rolls out Android 17 with floating windows and new Gemini features,en,fact
+Nvidia CEO Jensen Huang keynotes CES 2026 on physical-world AI,en,fact
+Former congressman Barney Frank dies at age 86,en,fact
+"Fact-checkers report over 1,500 debunked claims published in past year",en,fact
+Olivia Attwood rumored to attempt second I'm a Celebrity run,en,unverified
+AI-generated Zendaya 'wedding photos' circulate before being addressed on air,en,unverified
+Viral post falsely claims Treasury declared US government insolvent,en,fake
+"Claim that ICE pays bonuses per arrest lacks evidence, agency says",en,non_news
+'National Rape Day' hoax resurfaces on TikTok years after being debunked,en,non_news
+Woody Harrelson shares miscaptioned video claiming to show 5G tower removed in China,en,unverified
+Facebook hoax falsely claims a serial killer is loose in US cities,en,unverified
+Op-ed argues descendants of refugees now support policies against similar refugees,en,non_news
+Editorial: Massachusetts residents and businesses face growing unaffordability,en,unverified
+Longtime Washington Post columnist Joe Davidson describes resigning over 'too opinionated' column,en,non_news
+Editor's note explains Jacksonville Daily News' shift to a weekly opinion page,en,non_news
+Newsletter analysis argues AI proposal adds pressure for stronger oversight,en,unverified
+Feature asks whether bees and ChatGPT could be considered conscious,en,fact
+Commentary describes Washington Post opinion section pivoting toward conservative themes,en,fact
+Column explores whether political populism should be seen as bipartisan phenomenon,en,fact
+خسارة منتخب مصر أمام الأرجنتين 2-3 في ثمن نهائي كأس العالم 2026 وسط جدل تحكيمي واسع,ar,fact
+استبعاد الحكم الفرنسي لمباراة مصر والأرجنتين من كأس العالم 2026,ar,fact
+البنك المركزي المصري يعلن ارتفاع عجز الحساب الجاري إلى 14.6 مليار دولار,ar,fact
+حسابات مزيفة تنتحل هوية الحكم الفرنسي لوتيكسييه لإثارة الجدل بعد مباراة مصر والأرجنتين,ar,non_news
 NASA's Apollo 11 mission landed the first humans on the Moon in July 1969.,en,fact
 The World Health Organization declared COVID-19 a pandemic in March 2020.,en,fact
 Egypt and Ethiopia have been in long-running talks over the Grand Ethiopian Renaissance Dam on the Nile.,en,fact
 The 2022 FIFA World Cup was held in Qatar.,en,fact
 The Suez Canal was blocked for six days in March 2021 after a container ship ran aground.,en,fact
-Saudi Arabia and Egypt signed several economic cooperation agreements during a Gulf-Arab summit in 2023.,en,fact
 هبط رواد فضاء أبولو 11 على سطح القمر في يوليو 1969.,ar,fact
 أعلنت منظمة الصحة العالمية جائحة كورونا في مارس 2020.,ar,fact
-احتضنت قطر بطولة كأس العالم لكرة القدم عام 2022.,ar,fact
 توقف الملاحة في قناة السويس لمدة ستة أيام في مارس 2021 بعد جنوح سفينة حاويات.,ar,fact
 Scientists announced this week they have found a full cure for the common cold.,en,unverified
 A new species of dinosaur was discovered alive and well in the Amazon rainforest.,en,unverified
-A small European country has reportedly banned the internet entirely starting next month.,en,unverified
-Doctors now confirm eating chocolate every day adds ten years to your life.,en,unverified
-A hidden pyramid twice the size of the Great Pyramid of Giza was just found buried nearby.,en,unverified
-أعلن علماء هذا الأسبوع عن اكتشاف علاج نهائي لفيروس نقص المناعة البشرية.,ar,unverified
 تم العثور على مدينة أطلانطس المفقودة بالكامل تحت مياه البحر الأبيض المتوسط هذا الأسبوع.,ar,unverified
 أفادت تقارير غير مؤكدة بأن دولة عربية ستحظر استخدام النقود الورقية اعتباراً من الشهر المقبل.,ar,unverified
 What's your favorite pizza topping? Mine is definitely mushrooms.,en,non_news
-"Here's my grandmother's recipe for lemon cake, it takes about 40 minutes to bake.",en,non_news
 "I think Mondays should just be cancelled, who's with me?",en,non_news
 Can anyone recommend a good book to read on a rainy day?,en,non_news
 ما هو طبقك المفضل في رمضان؟ أنا أحب الكنافة كثيراً.,ar,non_news
@@ -29,15 +54,9 @@ New suspected Ebola cases have been reported in parts of Congo that were previou
 President Trump met Ukrainian President Volodymyr Zelenskyy at a NATO summit held in Turkey.,en,fact
 شنّت الولايات المتحدة ضربات جوية جديدة على إيران، وردّت طهران باستهداف دول حليفة لواشنطن في الشرق الأوسط.,ar,fact
 تم دفن المرشد الأعلى الإيراني الراحل آية الله علي خامنئي في مدينة مشهد بعد مراسم تشييع استمرت عدة أيام.,ar,fact
-"Iran and the United States have signed a permanent peace treaty this week, formally ending hostilities for good.",en,unverified
-The World Health Organization announced that the Ebola outbreak in Congo has been fully eradicated as of this month.,en,unverified
-NATO officials confirmed the alliance will dissolve entirely following this week's summit in Turkey.,en,unverified
-FIFA has reportedly moved the entire 2026 World Cup final to a new host city at the last minute.,en,unverified
-وقّعت إيران والولايات المتحدة معاهدة سلام دائمة هذا الأسبوع تنهي الأعمال العدائية نهائياً.,ar,unverified
-أعلنت منظمة الصحة العالمية القضاء الكامل على فيروس إيبولا في الكونغو هذا الشهر.,ar,unverified
+The World Health Organization announced that the Ebola outbreak in Congo has been fully eradicated as of this month.,en,fact
+أعلنت منظمة الصحة العالمية القضاء الكامل على فيروس إيبولا في الكونغو هذا الشهر.,ar,fact
 "I honestly think these US strikes on Iran are only going to make the region less stable, not more.",en,non_news
 "Whatever your politics, watching two elderly leaders bury a third at a funeral like that felt like the end of an era.",en,non_news
-My take on the World Cup so far: the underdog teams have been way more fun to watch than the favorites.,en,non_news
 I don't think another NATO summit is going to fix anything — it's the same photos every time.,en,non_news
-في رأيي، هذه الضربات لن تجلب سوى مزيد من عدم الاستقرار للمنطقة على المدى الطويل.,ar,non_news
-بصراحة، كأس العالم هذا الموسم كان الأجمل من ناحية المفاجآت رغم كل الانتقادات.,ar,non_news
+Iran has asked Yemen's Houthi movement to stand ready to close the Red Sea oil route if the United States strikes Iranian power infrastructure three sources told Reuters posing a potent new threat to global energy supplies.,en,fact
