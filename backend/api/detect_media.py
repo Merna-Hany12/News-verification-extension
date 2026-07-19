@@ -9,6 +9,8 @@ from fastapi import APIRouter, Request, HTTPException
 
 from backend.api.schemas import DetectMediaRequest
 
+from io import BytesIO
+
 router = APIRouter()
 
 # ─── 1. Face-Aware Fusion Logic ───
@@ -59,44 +61,57 @@ def face_aware_fusion(avg_df_prob: float, avg_ai_prob: float, pct_faces_detected
 # ─── 2. Route Handler ───
 @router.post("/detect-media")
 async def detect_media(request: DetectMediaRequest, req: Request):
-    if not request.video_url:
-        return {"verdict": "inconclusive", "confidence": 0.0, "explanation": "الصور غير مدعومة بعد.", "sources": []}
-
-    target_url = request.video_url
-    print(f"[HAQQ] Processing video URL: {target_url[:80]}...")
-
+    if not request.image_url and not request.video_url:
+        return {"verdict": "inconclusive", "confidence": 0.0, "explanation": "لا توجد وسائط لتحليلها.", "sources": []}
+    target_url = request.video_url or request.image_url
+    is_video = bool(request.video_url)
+    media_type = "video" if is_video else "image"
+    
+    print(f"[HAQQ] Processing {media_type} URL: {target_url[:80]}...")
     yunet = req.app.state.yunet
     gend_model = req.app.state.gend_model
     aigc_pipeline = req.app.state.aigc_pipeline
-
-    # 1. Download to Temp File
-    fd, temp_path = tempfile.mkstemp(suffix=".mp4")
-    os.close(fd)
-    
+    frames = []
+    temp_path = None
     try:
-        async with httpx.AsyncClient() as client:
+        # 1. Download Media (Image or Video)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
+        async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
             resp = await client.get(target_url, follow_redirects=True)
             resp.raise_for_status()
-            with open(temp_path, "wb") as f:
-                f.write(resp.content)
-
-        # 2. Extract Frames with OpenCV
-        cap = cv2.VideoCapture(temp_path)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total_frames == 0:
-            raise HTTPException(status_code=400, detail="Could not read video frames")
             
-        n_frames = 8
-        frame_indices = [int(i * (total_frames - 1) / (n_frames - 1)) for i in range(n_frames)]
-        
-        frames = []
-        for idx in frame_indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-            ret, frame_bgr = cap.read()
-            if ret:
-                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                frames.append(Image.fromarray(frame_rgb))
-        cap.release()
+            if is_video:
+                # --- VIDEO HANDLING (8 Frames) ---
+                fd, temp_path = tempfile.mkstemp(suffix=".mp4")
+                os.close(fd)
+                with open(temp_path, "wb") as f:
+                    f.write(resp.content)
+                    
+                cap = cv2.VideoCapture(temp_path)
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                if total_frames == 0:
+                    raise HTTPException(status_code=400, detail="Could not read video frames")
+                    
+                n_frames = 8
+                frame_indices = [int(i * (total_frames - 1) / (n_frames - 1)) for i in range(n_frames)]
+                
+                for idx in frame_indices:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                    ret, frame_bgr = cap.read()
+                    if ret:
+                        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                        frames.append(Image.fromarray(frame_rgb))
+            else:
+                # --- IMAGE HANDLING (1 Frame) ---
+                img = Image.open(BytesIO(resp.content)).convert("RGB")
+                frames.append(img)
+                
+        if not frames:
+            raise HTTPException(status_code=400, detail="Could not extract media frames")
+        # 3. Process Frames with YuNet (Everything below this remains EXACTLY the same)
+        processed_images = []
+    
+    
 
         # 3. Process Frames with YuNet
         processed_images = []
@@ -172,7 +187,6 @@ async def detect_media(request: DetectMediaRequest, req: Request):
         return result
 
     finally:
-        # 7. Cleanup: Delete Temp File Instantly
         # 7. Cleanup: Release OpenCV and Delete Temp File Instantly
         try:
             if 'cap' in locals() and cap is not None:
@@ -180,7 +194,7 @@ async def detect_media(request: DetectMediaRequest, req: Request):
         except Exception:
             pass
             
-        if os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
             except Exception:
