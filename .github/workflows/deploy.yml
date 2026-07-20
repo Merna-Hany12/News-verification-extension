@@ -1,0 +1,102 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD: Build → Push to ECR → Deploy to ECS
+# Triggers on backend changes pushed to main branch
+# ─────────────────────────────────────────────────────────────────────────────
+name: Deploy Backend to AWS ECS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "Dockerfile"
+      - ".github/workflows/deploy.yml"
+
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+# Only allow one deployment at a time (cancel in-progress if new push arrives)
+concurrency:
+  group: deploy-ecs
+  cancel-in-progress: true
+
+# OIDC: request a JWT token so we can assume an AWS IAM role without secrets
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+  ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+  TASK_DEFINITION_FILE: .aws/task-definition.json
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout code ──────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Configure AWS credentials via OIDC ─────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ── 3. Login to Amazon ECR Public ─────────────────────────────────────
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      # ── 4. Build, tag, and push Docker image ──────────────────────────────
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+        run: |
+          docker build \
+            -t $ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REPOSITORY:latest .
+
+          docker push $ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REPOSITORY:latest
+
+          echo "image=$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      # ── 5. Update ECS task definition with new image ──────────────────────
+      - name: Fill in the new image ID in the ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.TASK_DEFINITION_FILE }}
+          container-name: Main
+          image: ${{ steps.build-image.outputs.image }}
+
+      # ── 6. Deploy to ECS ──────────────────────────────────────────────────
+      - name: Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      # ── 7. Summary ────────────────────────────────────────────────────────
+      - name: Deployment summary
+        run: |
+          echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ steps.build-image.outputs.image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster** | \`${{ env.ECS_CLUSTER }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Service** | \`${{ env.ECS_SERVICE }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY

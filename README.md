@@ -14,6 +14,9 @@
   <img src="https://img.shields.io/badge/Chrome-Manifest%20V3-blue?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Chrome MV3" />
   <img src="https://img.shields.io/badge/Python-3.11+-yellow?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+" />
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Docker-Hub-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker Hub" />
+  <img src="https://img.shields.io/badge/AWS_ECS-Deployed-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS ECS" />
+  <img src="https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white" alt="CI/CD" />
   <img src="https://img.shields.io/badge/LangGraph-Pipeline-purple?style=for-the-badge" alt="LangGraph" />
   <img src="https://img.shields.io/badge/Groq-LLaMA_3.3_70B-orange?style=for-the-badge" alt="Groq LLM" />
   <img src="https://img.shields.io/badge/Language-AR%20%2B%20EN-red?style=for-the-badge" alt="Bilingual" />
@@ -21,6 +24,8 @@
 
 <p align="center">
   <a href="#-quick-start">Quick Start</a> •
+  <a href="#-docker--cloud-deployment-aws-ecs">Docker & ECS</a> •
+  <a href="#-cicd-pipeline-github-actions">CI/CD</a> •
   <a href="#-features">Features</a> •
   <a href="#-architecture">Architecture</a> •
   <a href="#-api-reference">API Reference</a> •
@@ -42,6 +47,8 @@
 - [Quick Start](#-quick-start)
   - [Backend](#1-backend)
   - [Chrome Extension](#2-chrome-extension)
+- [Docker & Cloud Deployment (AWS ECS)](#-docker--cloud-deployment-aws-ecs)
+- [CI/CD Pipeline (GitHub Actions)](#-cicd-pipeline-github-actions)
 - [Configuration](#%EF%B8%8F-configuration)
 - [API Reference](#-api-reference)
 - [How It Works](#-how-it-works)
@@ -337,6 +344,17 @@ News-verification-extension/
 │   └── icons/
 │       └── icon-128.png              # Extension icon
 │
+├── .github/
+│   └── workflows/
+│       └── deploy.yml                # CI/CD: Build → ECR → ECS on push to main
+│
+├── .aws/
+│   └── task-definition.json          # ECS Fargate task definition template
+│
+├── Dockerfile                        # CPU-optimized multi-stage production image
+├── docker-compose.yml                # Local / Codespaces compose config
+├── .dockerignore                     # Excludes .git, extension, notebooks from image
+│
 ├── notebooks/
 │   └── media_pipeline_eval.ipynb     # Evaluation notebook for media analysis pipeline
 │
@@ -518,6 +536,60 @@ Since HAQQ has a pre-built public Docker image, you can deploy it serverless on 
 2. Update the `NGROK_URL` key in `extension/background/config.js` with this URL.
 3. Update `host_permissions` in `extension/manifest.json` to include `"https://*.elb.amazonaws.com/*"`.
 4. Reload the extension in Chrome.
+
+---
+
+## 🔄 CI/CD Pipeline (GitHub Actions)
+
+HAQQ includes a fully automated CI/CD pipeline that builds, pushes, and deploys the backend whenever code changes are pushed to `main`.
+
+```
+  git push origin main (backend/ changed)
+        │
+        ▼
+  GitHub Actions triggers automatically
+        │
+        ├── 1. Build Docker image
+        ├── 2. Push to Amazon ECR (tagged: sha-abc123 + latest)
+        ├── 3. Update ECS task definition with new image
+        ├── 4. Deploy new task to ECS service
+        └── 5. Wait for deployment to stabilize ✅
+```
+
+### Key Features
+
+| Feature | Description |
+|---|---|
+| **Path filtering** | Only triggers when `backend/`, `Dockerfile`, or `requirements.deploy.txt` change |
+| **OIDC authentication** | Uses OpenID Connect to assume an AWS IAM Role — no long-lived access keys |
+| **Dual tagging** | Each image is tagged with `latest` + git commit SHA for traceability and rollback |
+| **Concurrency control** | Cancels in-progress deployments if a new push arrives |
+| **Health check** | Waits for ECS service to stabilize before marking success |
+| **Manual trigger** | Can also be triggered manually from the GitHub Actions tab |
+
+### Setup Requirements
+
+Before the pipeline works, you need to configure the following **one-time** AWS and GitHub settings:
+
+1. **AWS**: Create an ECR private repository named `haqq-backend`
+2. **AWS**: Add GitHub as an OIDC Identity Provider in IAM
+3. **AWS**: Create an IAM Role (`github-actions-haqq-deploy`) trusted by the GitHub OIDC provider
+4. **GitHub**: Add these repository secrets under **Settings → Secrets → Actions**:
+
+| Secret | Description |
+|---|---|
+| `AWS_ROLE_ARN` | ARN of the IAM role for GitHub Actions |
+| `AWS_REGION` | AWS region (e.g., `eu-central-1`) |
+| `ECR_REPOSITORY` | ECR repository name (`haqq-backend`) |
+| `ECS_CLUSTER` | Name of your ECS cluster |
+| `ECS_SERVICE` | Name of your ECS service |
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `.github/workflows/deploy.yml` | GitHub Actions workflow definition |
+| `.aws/task-definition.json` | ECS Fargate task definition template (image placeholder is replaced on each deploy) |
 
 ---
 
@@ -783,6 +855,16 @@ The evaluation notebook (`notebooks/media_pipeline_eval.ipynb`) provides additio
 | **Service Worker (v11)** | Background message routing, caching & deduplication |
 | **Content Script (v4)** | Facebook DOM manipulation, 2-button toolbar & verdict UI |
 | **MutationObserver** | Real-time post detection as user scrolls |
+
+### DevOps & Infrastructure
+
+| Technology | Purpose |
+|-----------|---------|
+| **[Docker](https://www.docker.com/)** | CPU-optimized multi-stage containerized build |
+| **[Docker Hub](https://hub.docker.com/r/darcklord/haqq-backend-cpu)** | Public image registry (`darcklord/haqq-backend-cpu`) |
+| **[Amazon ECR](https://aws.amazon.com/ecr/)** | Private container registry for ECS deployments |
+| **[Amazon ECS Express Mode](https://aws.amazon.com/ecs/)** | Serverless container orchestration (Fargate) |
+| **[GitHub Actions](https://github.com/features/actions)** | CI/CD pipeline: auto build → push → deploy on every push to `main` |
 
 ---
 
