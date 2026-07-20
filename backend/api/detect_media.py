@@ -171,13 +171,26 @@ async def _extract_frames_playwright(url: str, is_permalink: bool = False) -> li
                 "--disable-blink-features=AutomationControlled",
             ],
         )
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
-            viewport={"width": 390, "height": 844},
-            device_scale_factor=3,
-            is_mobile=True,
-            has_touch=True,
-        )
+        
+        # Use Mobile UA ONLY for Facebook to get the simpler m.facebook.com DOM.
+        # Use Desktop UA for TikTok and Instagram to avoid aggressive app-install popups!
+        if "facebook.com" in url or "fb.watch" in url:
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+                viewport={"width": 390, "height": 844},
+                device_scale_factor=3,
+                is_mobile=True,
+                has_touch=True,
+            )
+        else:
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 720},
+                device_scale_factor=1,
+                is_mobile=False,
+                has_touch=False,
+            )
+            
         page = await context.new_page()
 
         try:
@@ -196,20 +209,76 @@ async def _extract_frames_playwright(url: str, is_permalink: bool = False) -> li
                     pass
 
                 video = page.locator("video").first
-                await video.wait_for(state="attached", timeout=30000)
+                try:
+                    # Give heavy desktop sites like Facebook 40s to load the React DOM
+                    await video.wait_for(state="attached", timeout=40000)
+                except Exception as e:
+                    raise NotAVideoError("No <video> element found on the page within 40 seconds.")
             else:
                 html = (
                     f'<video id="v" autoplay muted playsinline src="{url}" '
                     f'style="width:800px;height:800px;object-fit:contain;background:#000"></video>'
                 )
                 await page.set_content(html, wait_until="domcontentloaded")
-                video = page.locator("#v")
-                await video.wait_for(state="attached", timeout=15000)
+                video = page.locator("video").first
+                try:
+                    # Wait up to 10 seconds for a video element to appear
+                    await video.wait_for(state="attached", timeout=10000)
+                except Exception as e:
+                    raise NotAVideoError(f"No <video> element found on the page within 10 seconds ({e}).")
 
             await page.evaluate(
                 "() => { const v = document.querySelector('video'); "
                 "if (v) { v.muted = true; v.play().catch(() => {}); } }"
             )
+
+            # --- NUKE ALL OVERLAYS AND MODALS ---
+            # TikTok (and Facebook) sometimes show "Watch on App", "Got it",
+            # or login modals that visually cover the <video> element. 
+            # Because Playwright screenshots the element's bounding box, 
+            # any DOM element positioned on top of the video gets captured!
+            await page.evaluate("""
+                () => {
+                    const v = document.querySelector('video');
+                    if (v) {
+                        // 1. Rip the video out of its CSS stacking context!
+                        // If it's trapped in a container with z-index: 1, our high z-index won't work.
+                        if (v.parentElement !== document.body) {
+                            document.body.appendChild(v);
+                        }
+                        
+                        // 2. Force the video to the very top, full screen
+                        v.style.position = 'fixed';
+                        v.style.top = '0';
+                        v.style.left = '0';
+                        v.style.width = '100vw';
+                        v.style.height = '100vh';
+                        v.style.zIndex = '2147483647'; // Max CSS z-index
+                        v.style.background = 'black';
+                        v.style.objectFit = 'contain';
+                        v.style.visibility = 'visible';
+                        v.style.opacity = '1';
+                        
+                        // 3. Hide any other high z-index elements (modals, overlays)
+                        document.querySelectorAll('*').forEach(el => {
+                            if (el === v || v.contains(el)) return;
+                            const style = window.getComputedStyle(el);
+                            if (style.zIndex !== 'auto' && parseInt(style.zIndex) > 10) {
+                                el.style.opacity = '0';
+                                el.style.pointerEvents = 'none';
+                            }
+                        });
+                    }
+                    
+                    // 3. Click any 'Got it' or 'Close' buttons just in case they pause playback
+                    document.querySelectorAll('div, button, span').forEach(el => {
+                        const t = (el.innerText || '').toLowerCase();
+                        if (t === 'got it' || t === 'not now' || t === 'close' || t === 'ليس الآن' || t === 'موافق') {
+                            try { el.click(); } catch(e) {}
+                        }
+                    });
+                }
+            """)
 
             # Wait for metadata. Facebook-style CDNs frequently serve
             # video via MSE (Media Source Extensions), where
@@ -610,18 +679,18 @@ async def detect_media(request: DetectMediaRequest, req: Request):
             timestamps = [fr["timestamp"] for fr in frame_records]
             saved_frames_dir = save_frames_to_disk(frames, timestamps, target_url)
         except NotAVideoError as e:
-            # This is now the ONLY trusted signal that a video_url is
-            # actually a static image — readyState stayed 0 inside a
-            # real browser, not just a HEAD-request guess. Re-route to
-            # the SAME image path used above, instead of repeatedly
-            # screenshotting an empty video box and returning an
-            # identical, meaningless result every time.
+            # The page didn't have a video, or it was a static image pretending to be one.
             print(f"[HAQQ] {e} — redirecting to single-image analysis instead")
+            fallback_url = request.image_url if is_permalink else target_url
+            if not fallback_url:
+                fallback_url = request.image_url or request.video_url
+                
             try:
-                img = await _download_single_image(target_url)
+                print(f"[HAQQ] Using fallback URL for image analysis: {fallback_url[:80]}")
+                img = await _download_single_image(fallback_url)
                 frames, extraction_method = [img], "single-image"
                 timestamps = [None]
-                saved_frames_dir = save_frames_to_disk(frames, timestamps, target_url)
+                saved_frames_dir = save_frames_to_disk(frames, timestamps, fallback_url)
             except Exception as img_e:
                 print(f"[HAQQ] Redirect-to-image also failed: {img_e}")
                 raise HTTPException(
@@ -630,12 +699,14 @@ async def detect_media(request: DetectMediaRequest, req: Request):
                 )
         except Exception as e:
             print(f"[HAQQ] Playwright failed: {e}. Trying to fallback to image_url...")
-            if request.video_url and request.video_url != target_url:
+            fallback_url = request.image_url or (request.video_url if request.video_url and request.video_url != target_url else None)
+            if fallback_url:
                 try:
-                    img = await _download_single_image(request.video_url)
+                    print(f"[HAQQ] Using fallback URL for image analysis: {fallback_url[:80]}")
+                    img = await _download_single_image(fallback_url)
                     frames, extraction_method = [img], "single-image"
                     timestamps = [None]
-                    saved_frames_dir = save_frames_to_disk(frames, timestamps, request.video_url)
+                    saved_frames_dir = save_frames_to_disk(frames, timestamps, fallback_url)
                 except Exception as img_e:
                     raise HTTPException(
                         status_code=400,
