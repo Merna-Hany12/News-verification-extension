@@ -31,11 +31,9 @@ import torch
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("LOADING CLASSIFIER...")
-    classifier = pipeline(
-        "zero-shot-classification",
-        model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli",
-    )
+    print("LOADING CLASSIFIER (SetFit)...")
+    from setfit import SetFitModel
+    classifier = SetFitModel.from_pretrained("darck-12/news-classification-minilm")
     app.state.classifier = classifier
     print("CLASSIFIER LOADED ✅")
 

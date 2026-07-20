@@ -41,7 +41,7 @@ def _log_trusted(articles: list[dict], tag: str) -> None:
 
 
 # Personal-opinion detection ---------------------------------------------
-# The upstream classifier occasionally mislabels subjective, first-person
+# The SetFit classifier occasionally mislabels subjective, first-person
 # opinion posts ("أعتقد أن الحكومة مقصرة", "I think this policy is terrible")
 # as verifiable news/medical/general claims. There's no factual claim to
 # check evidence against in these cases, so running them through source

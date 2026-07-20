@@ -9,29 +9,22 @@ from backend.graph.builder import run_verify
 
 router = APIRouter()
 
-# ─── LABELS (used by /classify) ───────────────────────────
-LABELS = [
-    "news report breaking news journalism media coverage event announcement",
-    "personal opinion social media post joke gossip casual conversation",
-]
-
-
 @router.post("/classify")
 def classify_text(request: TextRequest, req: Request):
     classifier = getattr(req.app.state, "classifier", None)
     if not classifier:
         raise HTTPException(status_code=500, detail="Classifier model not loaded")
 
-    result = classifier(request.text, LABELS)
+    text_truncated = request.text[:500]
+    probs = classifier.predict_proba([text_truncated])[0]
+    pred_idx = int(classifier.predict([text_truncated])[0])
 
-    news_score     = 0.0
-    non_news_score = 0.0
+    label_names = {0: "news", 1: "historical_scientific", 2: "medical", 3: "non_news"}
+    label = label_names.get(pred_idx, "news")
+    score = float(probs[pred_idx])
 
-    for label, score in zip(result["labels"], result["scores"]):
-        if "news" in label.lower() or "report" in label.lower():
-            news_score = float(score)
-        else:
-            non_news_score = float(score)
+    news_score = float(probs[0] + probs[1] + probs[2])
+    non_news_score = float(probs[3])
 
     print(f"[HAQQ] news_score    : {news_score:.3f}")
     print(f"[HAQQ] non_news_score: {non_news_score:.3f}")
@@ -40,8 +33,8 @@ def classify_text(request: TextRequest, req: Request):
     is_news = news_score > non_news_score and news_score >= 0.50
 
     return {
-        "label":          result["labels"][0],
-        "score":          float(result["scores"][0]),
+        "label":          label,
+        "score":          score,
         "news_score":     news_score,
         "non_news_score": non_news_score,
         "is_news":        is_news,
