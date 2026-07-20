@@ -209,11 +209,32 @@ async def _extract_frames_playwright(url: str, is_permalink: bool = False) -> li
                     pass
 
                 video = page.locator("video").first
+                # 1. Wait for ANY video element to appear first
                 try:
-                    # Give heavy desktop sites like Facebook 40s to load the React DOM
-                    await video.wait_for(state="attached", timeout=40000)
+                    await page.locator("video").first.wait_for(state="attached", timeout=40000)
                 except Exception as e:
                     raise NotAVideoError("No <video> element found on the page within 40 seconds.")
+                
+                # 2. Now find the LARGEST video on the screen and tag it!
+                # This guarantees we extract the main video, not a tiny thumbnail or preloaded hidden ad!
+                await page.evaluate("""
+                    () => {
+                        let maxArea = 0;
+                        let bestVid = null;
+                        document.querySelectorAll('video').forEach(v => {
+                            const rect = v.getBoundingClientRect();
+                            const area = rect.width * rect.height;
+                            if (area > maxArea) {
+                                maxArea = area;
+                                bestVid = v;
+                            }
+                        });
+                        if (bestVid) {
+                            bestVid.id = 'haqq-target-video';
+                        }
+                    }
+                """)
+                video = page.locator("#haqq-target-video")
             else:
                 html = (
                     f'<video id="v" autoplay muted playsinline src="{url}" '
