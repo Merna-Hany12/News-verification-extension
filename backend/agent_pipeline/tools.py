@@ -101,11 +101,15 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_duckduckgo_tool",
-            "description": "Search DuckDuckGo for general, encyclopedic, historical, and scientific information.",
+            "description": (
+                "Search DuckDuckGo for encyclopedic, historical, and scientific facts. "
+                "Best for verifying historical events, scientific claims, and general knowledge. "
+                "NOT suitable for breaking news — use search_google_rss_tool or search_news_apis_tool instead."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string"},
+                    "query": {"type": "string", "description": "Search query in the claim's language."},
                     "lang": {"type": "string", "description": "Language code, default 'ar'"}
                 },
                 "required": ["query"]
@@ -116,11 +120,15 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_google_rss_tool",
-            "description": "Search Google News RSS for news coverage.",
+            "description": (
+                "Search Google News for recent news articles and press coverage. "
+                "Best FIRST choice for verifying current news claims, political events, and recent incidents. "
+                "Returns headlines and snippets from major news outlets."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string"},
+                    "query": {"type": "string", "description": "Search query in the claim's language."},
                     "lang": {"type": "string", "description": "Language code, default 'ar'"}
                 },
                 "required": ["query"]
@@ -131,11 +139,16 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_pubmed_tool",
-            "description": "Search PubMed for medical, health, and peer-reviewed biomedical literature. Must be used for any medical claims.",
+            "description": (
+                "Search PubMed for peer-reviewed medical and biomedical research papers. "
+                "MUST be used as the FIRST tool for any health or medical claim. "
+                "Returns academic papers and clinical studies. "
+                "Do NOT use for non-medical claims such as politics, sports, or history."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string"},
+                    "query": {"type": "string", "description": "Medical/scientific search query, preferably in English."},
                     "lang": {"type": "string", "description": "Language code, default 'ar'"}
                 },
                 "required": ["query"]
@@ -146,11 +159,16 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_news_apis_tool",
-            "description": "Search paid news APIs (NewsData, Currents, GNews) for breaking news.",
+            "description": (
+                "Search multiple news databases (NewsData, Currents, GNews) for breaking news and recent reporting. "
+                "Use as a SECOND source after search_google_rss_tool for news claims, "
+                "or when Google RSS returns insufficient results. "
+                "Do NOT use for historical or scientific claims."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string"},
+                    "query": {"type": "string", "description": "News search query in the claim's language."},
                     "lang": {"type": "string", "description": "Language code, default 'ar'"}
                 },
                 "required": ["query"]
@@ -161,11 +179,16 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "fetch_article_body_tool",
-            "description": "Fetch the full text body of a specific article URL.",
+            "description": (
+                "Fetch the full article text from a URL found in search results. "
+                "Use ONLY when you need to read the full content of a promising article "
+                "whose snippet is insufficient to verify the claim. "
+                "Maximum 2 uses per verification session — choose URLs wisely."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "The URL of the article to fetch."}
+                    "url": {"type": "string", "description": "The full URL of the article to fetch."}
                 },
                 "required": ["url"]
             }
