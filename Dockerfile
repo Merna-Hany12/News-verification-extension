@@ -1,0 +1,47 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage 1: Builder — install all Python deps in an isolated layer
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+COPY backend/requirements.deploy.txt ./requirements.txt
+
+# Install CPU-only PyTorch + torchvision first (skips the ~2 GB CUDA bundle).
+# Both must come from the same CPU index to avoid version mismatches.
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir \
+        torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements.txt
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage 2: Runtime — copy only what's needed from the builder
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+# Tell EasyOCR / Transformers / HF to cache into /app/.cache
+ENV HF_HOME=/app/.cache/huggingface
+ENV EASYOCR_MODULE_PATH=/app/.cache/easyocr
+
+# System deps (minimal)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+    ffmpeg curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy installed Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy application code only
+COPY backend/ ./backend/
+
+EXPOSE 8000
+
+# Models download on first startup (~60s extra on first boot only).
+# Subsequent restarts use the cached volume.
+CMD ["python", "-m", "backend.main"]
