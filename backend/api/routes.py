@@ -87,56 +87,68 @@ def ocr_image(request: ImageRequest, req: Request):
 MIN_TEXT_LEN = 15
 
 
+from backend.observability.axiom_logger import axiom_logger, extract_platform
+import time
+
 @router.post("/verify-content")
 async def verify_content(request: VerifyContentRequest, req: Request):
     """
     Single-request replacement for the extension's old client-side
-    orchestration (verify text -> maybe OCR -> maybe re-verify). Collapses
-    what used to be up to 3 separate chrome.runtime round trips into one.
+    orchestration (verify text -> maybe OCR -> maybe re-verify).
     """
+    start_time = time.time()
+    request_id = getattr(req.state, 'request_id', 'unknown')
+    
     graph      = getattr(req.app.state, "haqq_graph", None)
     ocr_reader = getattr(req.app.state, "ocr_reader", None)
     if not graph:
         raise HTTPException(status_code=500, detail="LangGraph pipeline not compiled")
 
     direct_text = (request.text or "").strip()
-
-    # OCR is CPU-bound/synchronous — run it in a thread so it executes
-    # concurrently with run_verify's async I/O instead of blocking the
-    # event loop. Fired immediately, same "don't wait to find out if we
-    # need it" principle as the old client-side version.
     ocr_task = (
         asyncio.create_task(asyncio.to_thread(_run_ocr_sync, request.image_url, ocr_reader))
         if request.image_url else None
     )
 
-    # Case 1: direct text too short to bother verifying — go straight to OCR.
+    def _log_and_return(result: dict, text_source: str):
+        elapsed_ms = (time.time() - start_time) * 1000
+        axiom_logger.log_verification_event({
+            "request_id": request_id,
+            "pipeline": "traditional",
+            "text_source": text_source,
+            "verdict": result.get("verdict"),
+            "content_type": result.get("content_type"),
+            "confidence": result.get("confidence"),
+            "total_tokens": result.get("total_tokens", 0),
+            "total_cost_usd": result.get("total_cost_usd", 0.0),
+            "latency_ms": elapsed_ms,
+            "trusted_sources_count": sum(1 for s in result.get("sources", []) if s.get("trusted")),
+            "lang": request.lang,
+            "text_length": len(direct_text),
+            "platform": extract_platform(request.image_url)
+        })
+        return {**result, "text_source": text_source}
+
     if len(direct_text) < MIN_TEXT_LEN:
         ocr_text = ((await ocr_task) if ocr_task else "").strip()
         if len(ocr_text) < MIN_TEXT_LEN:
-            return {
+            return _log_and_return({
                 "verdict": "unverified",
                 "confidence": 0,
                 "explanation": "لا يوجد نص كافٍ في هذا المنشور للتحقق منه.",
                 "sources": [],
-                "text_source": "none",
-            }
-        result = await run_verify(graph, ocr_text, request.lang)
-        return {**result, "text_source": "ocr"}
+            }, "none")
+        result = await run_verify(graph, ocr_text, request.lang, request_id)
+        return _log_and_return(result, "ocr")
 
-    # Case 2: verify the direct text first.
-    first_result = await run_verify(graph, direct_text, request.lang)
+    first_result = await run_verify(graph, direct_text, request.lang, request_id)
 
-    # Fall back to OCR on "unverified" (checkable claim, nothing
-    # conclusive from the caption) or "non_news" (caption reads as
-    # opinion, but the image itself might contain a real claim).
     should_try_ocr = first_result.get("verdict") in ("unverified", "non_news")
-
     if should_try_ocr and ocr_task:
         ocr_text = ((await ocr_task) or "").strip()
         if len(ocr_text) >= MIN_TEXT_LEN:
-            ocr_result = await run_verify(graph, ocr_text, request.lang)
-            return {**ocr_result, "text_source": "ocr_retry"}
+            ocr_result = await run_verify(graph, ocr_text, request.lang, request_id)
+            return _log_and_return(ocr_result, "ocr_retry")
 
-    return {**first_result, "text_source": "direct"}
+    return _log_and_return(first_result, "direct")
 

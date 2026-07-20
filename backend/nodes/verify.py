@@ -74,6 +74,15 @@ def _looks_like_personal_opinion(text: str) -> bool:
     return any(m in blob for m in _OPINION_MARKERS_AR) or any(m in blob for m in _OPINION_MARKERS_EN)
 
 
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+@traceable(name="llm_verify", run_type="chain")
 async def llm_verify_node(state: HAQQState) -> HAQQState:
     claim        = state["text"]
     articles     = state["articles"]
