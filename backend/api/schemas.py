@@ -11,13 +11,11 @@ class VerifyRequest(BaseModel):
     text: str
     lang: str = "ar"   # "ar" or "en" — extension sends this
 
-class DetectMediaRequest(BaseModel):
-    image_url: Optional[str] = None
-    video_url: Optional[str] = None
 class VerifyContentRequest(BaseModel):
     text: Optional[str] = None
     image_url: Optional[str] = None
     lang: str = "ar"
+
 class DetectMediaRequest(BaseModel):
     image_url: Optional[str] = None
     video_url: Optional[str] = None
