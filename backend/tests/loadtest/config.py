@@ -8,7 +8,7 @@ import os
 
 # ─── Target Host ──────────────────────────────────────────────────────────────
 # Set via env var LOCUST_HOST or --host CLI flag. This is just the fallback.
-TARGET_HOST = os.environ.get("LOCUST_HOST", "http://localhost:8000")
+TARGET_HOST = os.environ.get("LOCUST_HOST", "https://ha-d1503bd4c01449c09f983bd5ec1cc3b3.ecs.us-east-1.on.aws")
 
 
 # ─── Per-Endpoint P95 Latency SLAs (milliseconds) ────────────────────────────
