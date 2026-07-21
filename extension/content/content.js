@@ -654,20 +654,39 @@ function makeBtn(type, postEl, content) {
                 }
                 if (!postPermalink) postPermalink = window.location.href;
             }
-          } else {
+          }     else {
             // FACEBOOK LOGIC (and everything else)
-            const allLinks = postEl.querySelectorAll("a[href]");
-            for (const a of allLinks) {
-              const href = a.getAttribute("href") || "";
-              if (/\/(watch|videos|reel|posts|permalink)\//.test(href) ||
-                  /\/\d+\/?$/.test(href) ||
-                  /story_fbid/.test(href)) {
-                postPermalink = new URL(href, location.origin).href;
-                break;
-              }
+            
+            // 1. If we are already on a dedicated video page, use the URL!
+            const isDirectPage = /\/(watch|videos|reel|posts|permalink)\//.test(window.location.href);
+            if (isDirectPage) {
+                postPermalink = window.location.href;
             }
-          }
 
+            // 2. Best case: Facebook puts the video ID directly in the HTML!
+            if (!postPermalink) {
+                const videoIdNode = postEl.querySelector('[data-video-id]');
+                if (videoIdNode) {
+                    const vidId = videoIdNode.getAttribute('data-video-id');
+                    if (vidId) {
+                        postPermalink = `https://www.facebook.com/watch/?v=${vidId}`;
+                    }
+                }
+            }
+            
+            // 3. Fallback: Search for links, but be strict (no random hashtags!)
+            if (!postPermalink) {
+                const allLinks = postEl.querySelectorAll("a[href]");
+                for (const a of allLinks) {
+                  const href = a.getAttribute("href") || "";
+                  if (href.startsWith("http") && !href.includes("facebook.com")) continue;
+                  if (/\/(watch|videos|reel|posts|permalink)\//.test(href) || /story_fbid/.test(href)) {
+                    postPermalink = new URL(href, location.origin).href;
+                    break;
+                  }
+                }
+            } 
+          }
 
 
           finalContent = {

@@ -683,6 +683,7 @@ async def detect_media(request: DetectMediaRequest, req: Request):
             img = await _download_single_image(request.image_url)
             frames, extraction_method = [img], "single-image"
             timestamps = [None]
+            saved_frames_dir = save_frames_to_disk(frames, timestamps, request.image_url)
         except Exception as e:
             print(f"[HAQQ] Image download/decode failed: {e}")
             print(traceback.format_exc())
