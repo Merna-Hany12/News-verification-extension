@@ -2,72 +2,46 @@
 
 document.addEventListener("DOMContentLoaded", () => {
 
-  // ── Wire up buttons (replaces onclick="..." which CSP blocks) ──
-  document.getElementById("saveBtn").addEventListener("click", saveKey);
-  document.getElementById("clearBtn").addEventListener("click", clearKey);
   document.getElementById("resetBtn").addEventListener("click", resetStats);
 
-  // ── Load saved key on open ──
-  chrome.storage.local.get("newsdata_api_key", (res) => {
+  // ── Load saved lang on open ──
+  chrome.storage.local.get(["news_lang"], (res) => {
     if (chrome.runtime.lastError) {
       showMsg("err", "❌ خطأ في القراءة: " + chrome.runtime.lastError.message);
       return;
     }
-    const key = res["newsdata_api_key"];
-    if (key) {
-      document.getElementById("key").value = key;
-      showMsg("ok", "✔ المفتاح موجود ومحفوظ");
-    } else {
-      showMsg("info", "ℹ️ لا يوجد مفتاح محفوظ بعد");
-    }
+    const lang = res.news_lang || "ar";
+    document.getElementById("lang").value = lang;
+    updatePopupLanguage(lang);
+  });
+
+  document.getElementById("lang").addEventListener("change", (e) => {
+    const newLang = e.target.value;
+    updatePopupLanguage(newLang);
+    chrome.storage.local.set({ news_lang: newLang }, () => {
+      showMsg("ok", newLang === "en" ? "✔ Language saved" : "✔ تم حفظ اللغة");
+    });
   });
 
   loadStats();
 });
 
-// ── Save key ──────────────────────────────────────────────
-function saveKey() {
-  const val = document.getElementById("key").value.trim();
+const POPUP_I18N = {
+  "ui-sub": { ar: "كاشف المحتوى المضلل على منصات التواصل", en: "Misinformation & AI-media detector" },
+  "ui-total": { ar: "إجمالي", en: "Total" },
+  "ui-fact": { ar: "موثوق", en: "Verified" },
+  "ui-unver": { ar: "غير مؤكد", en: "Unverified" },
+  "ui-fake": { ar: "مضلل", en: "Fake" },
+  "ui-ai": { ar: "AI", en: "AI Generated" },
+  "resetBtn": { ar: "↺ إعادة تعيين الإحصائيات", en: "↺ Reset Stats" }
+};
 
-  if (!val) {
-    showMsg("err", "❌ الحقل فارغ");
-    return;
+function updatePopupLanguage(lang) {
+  document.documentElement.dir = lang === "en" ? "ltr" : "rtl";
+  for (const [id, translations] of Object.entries(POPUP_I18N)) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = translations[lang] || translations.ar;
   }
-  if (!val.startsWith("pub_")) {
-    showMsg("err", "❌ المفتاح يجب أن يبدأ بـ pub_");
-    return;
-  }
-
-  const btn = document.getElementById("saveBtn");
-  btn.disabled = true;
-  btn.textContent = "⏳ جاري الحفظ…";
-
-  chrome.storage.local.set({ newsdata_api_key: val }, () => {
-    btn.disabled = false;
-    btn.textContent = "💾 حفظ المفتاح";
-
-    if (chrome.runtime.lastError) {
-      showMsg("err", "❌ فشل الحفظ: " + chrome.runtime.lastError.message);
-      return;
-    }
-
-    // Read back to confirm it was actually written
-    chrome.storage.local.get("newsdata_api_key", (res) => {
-      if (res.newsdata_api_key === val) {
-        showMsg("ok", "✔ تم الحفظ: " + val.slice(0, 10) + "…");
-      } else {
-        showMsg("err", "❌ الحفظ فشل — حاول مرة أخرى");
-      }
-    });
-  });
-}
-
-// ── Clear key ─────────────────────────────────────────────
-function clearKey() {
-  chrome.storage.local.remove("newsdata_api_key", () => {
-    document.getElementById("key").value = "";
-    showMsg("info", "ℹ️ تم حذف المفتاح");
-  });
 }
 
 // ── Stats ─────────────────────────────────────────────────

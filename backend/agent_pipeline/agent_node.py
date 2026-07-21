@@ -76,9 +76,12 @@ async def agent_node(state: AgentHAQQState) -> AgentHAQQState:
     claim = state["text"]
     content_type = state.get("content_type", "news")
     keywords = state.get("keywords", claim)
+    lang = state.get("lang", "ar")
 
     # Select the right tool strategy; fall back to news if unknown
     strategy = TOOL_STRATEGY.get(content_type, TOOL_STRATEGY["news"])
+    
+    explanation_instruction = "<short English explanation of the findings>" if lang == "en" else "<short Arabic explanation of the findings>"
 
     system_msg = {
         "role": "system",
@@ -101,7 +104,7 @@ Once you have gathered enough evidence, your final message MUST be a JSON object
 {{
   "verdict": "fact" | "unverified" | "fake" | "non_news",
   "confidence": <float between 0.0 and 1.0>,
-  "explanation": "<short Arabic explanation of the findings>",
+  "explanation": "{explanation_instruction}",
   "sources": [
      {{"url": "...", "title": "..."}}
   ]

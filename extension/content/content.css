@@ -211,7 +211,6 @@ html[data-haqq-platform="tiktok"] .haqq-spinner {
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   background: #1a1a1a !important;
   font-family: 'Segoe UI', Arial, sans-serif !important;
-  direction: rtl !important;
   animation: haqq-in 0.22s cubic-bezier(0.2, 0.8, 0.3, 1) !important;
   overflow: visible !important;
   z-index: 10 !important;
@@ -221,6 +220,9 @@ html[data-haqq-platform="tiktok"] .haqq-spinner {
   from { opacity: 0; transform: translateY(-6px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+.haqq-badge[dir="rtl"] { direction: rtl !important; }
+.haqq-badge[dir="ltr"] { direction: ltr !important; }
 
 /* Badge color variants — dark fill + colored left accent border. */
 .haqq-badge--fact,
@@ -271,8 +273,8 @@ html[data-haqq-platform="tiktok"] .haqq-spinner {
   display: flex !important;
   align-items: center !important;
   gap: 6px !important;
-  margin-right: auto !important;
-  margin-left: 0 !important;
+  margin-inline-start: auto !important;
+  margin-inline-end: 0 !important;
   flex-wrap: wrap !important;
 }
 
