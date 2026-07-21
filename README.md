@@ -146,7 +146,7 @@ When you visit Facebook with HAQQ installed, every post gets a verification tool
 | Feature | Description |
 |---------|-------------|
 | **Merged Text + Image Flow** | Post text and OCR-extracted image text are processed **in parallel**; the stronger signal is selected for verification. |
-| **Three-Class Classification** | Distinguishes between **news**, **historical/scientific content**, and **non-news** (opinions, jokes, memes) using `mDeBERTa-v3-base-mnli-xnli`. |
+| **Four-Class SetFit Classification** | Distinguishes between **news**, **historical/scientific**, **medical**, and **non-news** (opinions, jokes, memes) using the fine-tuned SetFit model (`darck-12/news-classification-minilm`). |
 | **Multi-Source News Search** | Queries NewsData.io, Currents API, GNews, Google News RSS, and DuckDuckGo HTML concurrently. |
 | **LLM Cross-Referencing** | Uses Groq (LLaMA 3.3 70B) to compare claims against retrieved articles with structured 3-line verdicts. |
 | **Topic Mismatch Detection** | Prevents false confirmations by detecting when articles are topically related but don't actually confirm the specific claim. |
@@ -239,8 +239,8 @@ When you visit Facebook with HAQQ installed, every post gets a verification tool
 The core of HAQQ is a **LangGraph** state machine with the following nodes:
 
 ### 1. `classify` — Content Classification
-- Uses **mDeBERTa-v3-base-mnli-xnli** (multilingual zero-shot classifier)
-- Three-class classification: `news`, `historical_scientific`, `non_news`
+- Uses a fine-tuned **SetFit** model (`darck-12/news-classification-minilm`)
+- Four-class classification: `news`, `historical_scientific`, `medical`, `non_news`
 - Ambiguity guard: scores below 0.45 default to `news` to avoid false negatives
 - Short text (< 20 chars) returns `unverified` immediately
 
@@ -627,7 +627,7 @@ Before the pipeline works, you need to configure the following **one-time** AWS 
 
 ### `POST /classify`
 
-Classify text as news or non-news using zero-shot NLI classification.
+Classify text into one of four categories using the fine-tuned SetFit classifier.
 
 <details>
 <summary><strong>Request / Response</strong></summary>
@@ -635,17 +635,17 @@ Classify text as news or non-news using zero-shot NLI classification.
 **Request:**
 ```json
 {
-  "text": "عاجل: زلزال بقوة 6.5 يضرب تركيا"
+  "text": "الحكومة أعلنت اليوم عن رفع أسعار الوقود"
 }
 ```
 
 **Response:**
 ```json
 {
-  "label": "news report breaking news...",
-  "score": 0.89,
-  "news_score": 0.89,
-  "non_news_score": 0.11,
+  "label": "news",
+  "score": 0.94,
+  "news_score": 0.94,
+  "non_news_score": 0.06,
   "is_news": true
 }
 ```
@@ -837,7 +837,7 @@ The evaluation notebook (`notebooks/media_pipeline_eval.ipynb`) provides additio
 | **[uv](https://docs.astral.sh/uv/)** | Fast Python package manager & virtualenv tool |
 | **[FastAPI](https://fastapi.tiangolo.com/)** | Async web framework for the REST API |
 | **[LangGraph](https://langchain-ai.github.io/langgraph/)** | State machine framework for the verification pipeline |
-| **[Transformers](https://huggingface.co/docs/transformers)** (HuggingFace) | mDeBERTa zero-shot classifier |
+| **[SetFit](https://github.com/huggingface/setfit)** | Fine-tuned 4-class classifier (`darck-12/news-classification-minilm`) |
 | **[Groq](https://console.groq.com/)** | LLM inference (LLaMA 3.3 70B) |
 | **[EasyOCR](https://github.com/JaidedAI/EasyOCR)** | Optical character recognition (Arabic + English) |
 | **[YAKE](https://github.com/LIAAD/yake)** | Unsupervised keyword extraction |
