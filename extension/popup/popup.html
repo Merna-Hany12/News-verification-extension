@@ -29,25 +29,26 @@
 </head>
 <body>
 
-<h1>🔍 HAQQ — حقّق</h1>
-<p class="sub">كاشف المحتوى المضلل على فيسبوك</p>
+<h1 id="ui-title">🔍 HAQQ — حقّق</h1>
+<p class="sub" id="ui-sub">كاشف المحتوى المضلل على منصات التواصل</p>
 
-<label>NewsData.io API Key</label>
-<input type="text" id="key" placeholder="pub_xxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
 
-<!-- NO onclick attributes — all events wired in popup.js -->
-<button class="btn btn-save" id="saveBtn">💾 حفظ المفتاح</button>
+<label>Language / لغة النتائج</label>
+<select id="lang" style="width: 100%; padding: 8px 10px; background: #1a1a1a; color: #eee; border: 1px solid #333; border-radius: 6px; font-size: 13px; margin-bottom: 12px; font-family: 'Segoe UI', Tahoma, Arial, sans-serif;">
+  <option value="ar">العربية (Arabic)</option>
+  <option value="en">English (الإنجليزية)</option>
+</select>
+
 <div class="msg" id="msg"></div>
-<button class="btn btn-clear" id="clearBtn">🗑 حذف المفتاح</button>
 
 <hr>
 
 <div class="stats">
-  <div>إجمالي: <b id="s-total">0</b></div>
-  <div>✅ موثوق: <b id="s-fact">0</b></div>
-  <div>⚠️ غير مؤكد: <b id="s-unver">0</b></div>
-  <div>❌ مضلل: <b id="s-fake">0</b></div>
-  <div>🤖 AI: <b id="s-ai">0</b></div>
+  <div><span id="ui-total">إجمالي</span>: <b id="s-total">0</b></div>
+  <div>✅ <span id="ui-fact">موثوق</span>: <b id="s-fact">0</b></div>
+  <div>⚠️ <span id="ui-unver">غير مؤكد</span>: <b id="s-unver">0</b></div>
+  <div>❌ <span id="ui-fake">مضلل</span>: <b id="s-fake">0</b></div>
+  <div>🤖 <span id="ui-ai">AI</span>: <b id="s-ai">0</b></div>
 </div>
 <button class="btn btn-reset" id="resetBtn">↺ إعادة تعيين الإحصائيات</button>
 

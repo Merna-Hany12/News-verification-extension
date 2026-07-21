@@ -79,7 +79,7 @@ async def _check_content_type(url: str, timeout: float = 6.0) -> str:
 
 
 # ─── 1. Face-Aware Fusion Logic ───
-def face_aware_fusion(avg_df_prob: float, avg_ai_prob: float, pct_faces_detected: float):
+def face_aware_fusion(avg_df_prob: float, avg_ai_prob: float, pct_faces_detected: float, lang: str = "ar"):
     """
     Face-detection-aware fusion.
     If faces are meaningfully present, trust the deepfake model first.
@@ -92,14 +92,14 @@ def face_aware_fusion(avg_df_prob: float, avg_ai_prob: float, pct_faces_detected
             return {
                 "verdict": "manipulated",
                 "confidence": float(avg_df_prob),
-                "explanation": "تم اكتشاف تلاعب في الوجوه (Deepfake).",
+                "explanation": "Deepfake manipulation detected." if lang == "en" else "تم اكتشاف تلاعب في الوجوه (Deepfake).",
                 "sources": []
             }
         elif avg_ai_prob >= 0.50:
             return {
                 "verdict": "ai_generated",
                 "confidence": float(avg_ai_prob),
-                "explanation": "المحتوى مولد بالذكاء الاصطناعي.",
+                "explanation": "AI-generated content detected." if lang == "en" else "المحتوى مولد بالذكاء الاصطناعي.",
                 "sources": []
             }
     else:
@@ -107,7 +107,7 @@ def face_aware_fusion(avg_df_prob: float, avg_ai_prob: float, pct_faces_detected
             return {
                 "verdict": "ai_generated",
                 "confidence": float(avg_ai_prob),
-                "explanation": "المحتوى مولد بالذكاء الاصطناعي.",
+                "explanation": "AI-generated content detected." if lang == "en" else "المحتوى مولد بالذكاء الاصطناعي.",
                 "sources": []
             }
 
@@ -115,7 +115,7 @@ def face_aware_fusion(avg_df_prob: float, avg_ai_prob: float, pct_faces_detected
     return {
         "verdict": "real",
         "confidence": float(p_real),
-        "explanation": "لم يتم اكتشاف تلاعب أو توليد بالذكاء الاصطناعي.",
+        "explanation": "No manipulation or AI generation detected." if lang == "en" else "لم يتم اكتشاف تلاعب أو توليد بالذكاء الاصطناعي.",
         "sources": []
     }
 
@@ -696,7 +696,8 @@ async def detect_media(request: DetectMediaRequest, req: Request):
             raise HTTPException(status_code=400, detail=f"Could not download image: {e}")
 
     else:
-        return {"verdict": "inconclusive", "confidence": 0.0, "explanation": "لا توجد وسائط لتحليلها.", "sources": []}
+        msg = "No media available to analyze." if request.lang == "en" else "لا توجد وسائط لتحليلها."
+        return {"verdict": "inconclusive", "confidence": 0.0, "explanation": msg, "sources": []}
 
     saved_frames_dir = None
 
@@ -803,7 +804,7 @@ async def detect_media(request: DetectMediaRequest, req: Request):
 
     # ── Face-Aware Fusion ──
     pct_faces = (sum(faces_detected) / len(frames)) * 100.0
-    result = face_aware_fusion(avg_df_prob, avg_ai_prob, pct_faces)
+    result = face_aware_fusion(avg_df_prob, avg_ai_prob, pct_faces, lang=request.lang)
 
     # Honest disclosure: a single poster-image analysis is a meaningfully
     # weaker signal than a full multi-frame video scan (can't catch
@@ -812,7 +813,10 @@ async def detect_media(request: DetectMediaRequest, req: Request):
     # isn't read the same way as a full video analysis.
     explanation = result["explanation"]
     if extraction_method == "single-image":
-        explanation += " ⚠️ (تحليل الصورة المصغّرة فقط — لم يتم تحميل الفيديو الفعلي بعد، الدقة أقل من تحليل كامل)"
+        if request.lang == "en":
+            explanation += " ⚠️ (Thumbnail analyzed only — full video extraction failed or skipped, accuracy is lower)"
+        else:
+            explanation += " ⚠️ (تحليل الصورة المصغّرة فقط — لم يتم تحميل الفيديو الفعلي بعد، الدقة أقل من تحليل كامل)"
     result["explanation"] = explanation
 
     # ── Per-Frame Breakdown (timestamp + individual scores) ──
