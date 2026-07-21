@@ -25,8 +25,7 @@ dependencies = [
     "transformers>=4.40.0",
     "uvicorn[standard]>=0.30.0",
     "ipykernel>=7.3.0",
-    "yake>=0.7.3",
-    "playwright>=1.61.0",
+
 ]
 
 [dependency-groups]

@@ -7,9 +7,11 @@
     "storage",
     "scripting",
     "alarms",
-    "activeTab"
+    "activeTab",
+    "tabs"
   ],
   "host_permissions": [
+    "<all_urls>",
     "https://www.facebook.com/*",
     "https://web.facebook.com/*",
     "https://m.facebook.com/*",

@@ -243,75 +243,108 @@ function extractAll(postEl) {
 // ─── CLIENT-SIDE FRAME CAPTURE via captureVisibleTab ──────────────────
 // Facebook serves video from cross-origin CDNs, making canvas.drawImage
 // + toDataURL throw SecurityError (tainted canvas). Instead, we:
-//   1. Scroll the video into view
-//   2. Seek to each timestamp
-//   3. Ask the service worker to call chrome.tabs.captureVisibleTab()
-//   4. Crop the screenshot to the video's bounding rect on a canvas
+//   1. Scroll the element into view
+//   2. Ask the service worker to call chrome.tabs.captureVisibleTab()
+//   3. Crop the screenshot to the cropEl's bounding rect on a canvas
 // This bypasses ALL CORS because captureVisibleTab captures composited
 // pixels, not DOM data.
+//
+// KEY INSIGHT: Facebook's feed videos render the <video> element in a
+// separate DOM layer (often off-screen/zero-size) while displaying the
+// content visually inside the post container via CSS compositing.
+// We use the POST container (cropEl) for screenshot bounds, and only
+// use videoEl for seeking/playback control. This way we always capture
+// what's visually on screen, regardless of where <video> is in the DOM.
 
-async function captureFramesFromLiveVideo(videoEl, nFrames = 8) {
-  // Make sure video is visible and playing
-  videoEl.scrollIntoView({ block: "center", behavior: "instant" });
-  await new Promise(r => setTimeout(r, 300));
+async function captureFramesFromLiveVideo(videoEl, nFrames = 8, cropEl = null) {
+  // cropEl: the element whose on-screen area we crop to.
+  // This should be the post container — it's always visible even when
+  // the <video> element itself is off-screen.
+  // Falls back to videoEl if not provided.
+  const displayEl = cropEl || videoEl;
+  if (!displayEl || !displayEl.isConnected) return [];
 
-  videoEl.muted = true;
-  const wasPlaying = !videoEl.paused;
-
-  // Try to start playback so data loads
-  try { await videoEl.play().catch(() => {}); } catch (_) {}
-  await new Promise(r => setTimeout(r, 500));
-
-  const duration = videoEl.duration;
-  const hasDuration = isFinite(duration) && duration > 0;
+  // Bring the post/display area into view
+  displayEl.scrollIntoView({ block: "center", behavior: "instant" });
+  await new Promise(r => setTimeout(r, 400));
 
   const frames = [];
 
-  if (hasDuration) {
-    // Seek-based: spread frames across the duration
-    videoEl.pause();
-    const inset = Math.min(0.15 * duration, 0.5);
-    const timestamps = Array.from({ length: nFrames }, (_, i) =>
-      inset + i * (duration - 2 * inset) / (nFrames - 1)
-    );
+  if (videoEl && videoEl.isConnected) {
+    // We have a video element — use it for playback/seek control
+    videoEl.muted = true;
+    const isPaused = videoEl.paused || videoEl.currentTime === 0;
+    const duration = videoEl.duration;
+    const hasValidDuration = isFinite(duration) && duration > 0;
 
-    for (const t of timestamps) {
-      await seekTo(videoEl, t);
-      await new Promise(r => setTimeout(r, 200)); // let the frame render
+    if (isPaused && hasValidDuration) {
+      // ─── SEEK-BASED (paused, known duration) ───
+      log(`captureFramesFromLiveVideo — seek-based (duration: ${duration.toFixed(2)}s), crop: ${cropEl ? 'postEl' : 'videoEl'}`);
+      const savedTime = videoEl.currentTime;
 
-      const frame = await captureVideoRect(videoEl);
-      if (frame) {
-        frames.push({ dataUrl: frame, timestamp: videoEl.currentTime });
+      const inset = Math.min(0.10 * duration, 0.5);
+      const timestamps = Array.from({ length: nFrames }, (_, i) =>
+        inset + i * (duration - 2 * inset) / (nFrames - 1)
+      );
+
+      for (const t of timestamps) {
+        if (!displayEl.isConnected) break;
+        await seekTo(videoEl, t);
+        await new Promise(r => setTimeout(r, 200));
+        const frame = await captureElementRect(displayEl);
+        if (frame) frames.push({ dataUrl: frame, timestamp: videoEl.currentTime });
+      }
+
+      if (videoEl.isConnected) videoEl.currentTime = savedTime;
+
+    } else {
+      // ─── INTERVAL-BASED (playing or MSE/unknown duration) ───
+      log(`captureFramesFromLiveVideo — interval-based (playing or stream), crop: ${cropEl ? 'postEl' : 'videoEl'}`);
+      if (videoEl.paused) {
+        try { await videoEl.play().catch(() => {}); } catch (_) {}
+      }
+
+      for (let i = 0; i < nFrames; i++) {
+        if (!displayEl.isConnected) break;
+        const frame = await captureElementRect(displayEl);
+        if (frame) frames.push({ dataUrl: frame, timestamp: videoEl.currentTime });
+        if (i < nFrames - 1) await new Promise(r => setTimeout(r, 1200));
       }
     }
 
-    if (wasPlaying) videoEl.play().catch(() => {});
   } else {
-    // Duration unknown (MSE/live) — capture as it plays, spaced out
-    if (videoEl.paused) {
-      try { await videoEl.play().catch(() => {}); } catch (_) {}
-    }
-    for (let i = 0; i < nFrames; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      const frame = await captureVideoRect(videoEl);
-      if (frame) {
-        frames.push({ dataUrl: frame, timestamp: videoEl.currentTime });
-      }
+    // ─── NO VIDEO ELEMENT — capture post area as-is ───
+    // The video is playing via CSS compositing that our querySelector
+    // couldn't reach. Still capture the visible post area at intervals
+    // to get the actual displayed frames.
+    log(`captureFramesFromLiveVideo — no <video> element; capturing post area directly (${nFrames} frames)`);
+    const captureCount = Math.min(nFrames, 5); // fewer captures without seek control
+    for (let i = 0; i < captureCount; i++) {
+      if (!displayEl.isConnected) break;
+      const frame = await captureElementRect(displayEl);
+      if (frame) frames.push({ dataUrl: frame, timestamp: null });
+      if (i < captureCount - 1) await new Promise(r => setTimeout(r, 1500));
     }
   }
 
   return frames;
 }
-  const grp = document.createElement("div");
-  grp.className = "haqq-btn-group";
-  grp.setAttribute("data-haqq-owned", "true");
 
-// Capture a screenshot of the visible tab and crop to the video's rect
-async function captureVideoRect(videoEl) {
-  const rect = videoEl.getBoundingClientRect();
+// Capture a screenshot of the visible tab and crop to the given element's rect.
+// Works for any element — post container, video element, etc.
+async function captureElementRect(el) {
+  if (!el || !el.isConnected) return null;
+
+  // Prefer cropping the video/media element container if available inside el
+  const targetEl = el.querySelector("video") ||
+                   el.querySelector('[aria-label*="Video" i]') ||
+                   el.querySelector('[aria-label*="فيديو"]') ||
+                   el;
+
+  const rect = targetEl.getBoundingClientRect();
   if (rect.width < 10 || rect.height < 10) return null;
 
-  // Ask service worker to screenshot the tab
+  // Ask service worker to screenshot the full visible tab
   const screenshotDataUrl = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       { type: "HAQQ_CAPTURE_TAB" },
@@ -323,42 +356,67 @@ async function captureVideoRect(videoEl) {
     );
   });
 
-  // Crop to video rect
+  // Crop to the element's rect, accounting for device pixel ratio
   const dpr = window.devicePixelRatio || 1;
-  const cropX = rect.left * dpr;
-  const cropY = rect.top * dpr;
-  const cropW = rect.width * dpr;
-  const cropH = rect.height * dpr;
 
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(cropW);
-      canvas.height = Math.round(cropH);
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img,
-        Math.round(cropX), Math.round(cropY), Math.round(cropW), Math.round(cropH),
-        0, 0, canvas.width, canvas.height
-      );
-      resolve(canvas.toDataURL("image/jpeg", 0.85));
+      try {
+        const dprX = rect.left * dpr;
+        const dprY = rect.top * dpr;
+        const dprW = rect.width * dpr;
+        const dprH = rect.height * dpr;
+
+        // Clamp source rectangle to image boundaries
+        const sx = Math.max(0, Math.min(img.width, dprX));
+        const sy = Math.max(0, Math.min(img.height, dprY));
+        const sRight = Math.max(0, Math.min(img.width, dprX + dprW));
+        const sBottom = Math.max(0, Math.min(img.height, dprY + dprH));
+
+        const sw = sRight - sx;
+        const sh = sBottom - sy;
+
+        if (sw < 10 || sh < 10) {
+          return resolve(null);
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(sw);
+        canvas.height = Math.round(sh);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(
+          img,
+          Math.round(sx), Math.round(sy), Math.round(sw), Math.round(sh),
+          0, 0, canvas.width, canvas.height
+        );
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      } catch (e) {
+        log("captureElementRect crop error:", e.message);
+        resolve(null);
+      }
     };
     img.onerror = () => resolve(null);
     img.src = screenshotDataUrl;
   });
 }
 
+// Keep captureVideoRect as a thin alias for backward compatibility
+const captureVideoRect = captureElementRect;
+
 function seekTo(videoEl, t) {
   return new Promise((resolve) => {
+    if (!videoEl || !videoEl.isConnected) return resolve();
     const onSeeked = () => { videoEl.removeEventListener("seeked", onSeeked); resolve(); };
     videoEl.addEventListener("seeked", onSeeked);
     videoEl.currentTime = t;
-    setTimeout(resolve, 3000); // fallback if seeked never fires
+    setTimeout(resolve, 2500); // fallback if seeked never fires
   });
 }
 
 // Waits for the video to actually load REAL data (not just the poster)
 async function waitForRealVideoData(videoEl, timeoutMs = 8000) {
+  if (!videoEl || !videoEl.isConnected) return false;
   const isReady = () => videoEl.readyState >= 2;
   if (isReady()) return true;
 
@@ -378,20 +436,6 @@ async function waitForRealVideoData(videoEl, timeoutMs = 8000) {
     );
     setTimeout(() => { cleanup(); resolve(isReady()); }, timeoutMs);
   });
-  if (PLATFORM === "instagram" || PLATFORM === "tiktok") {
-    const insertedNatively = insertButtonsIntoActionColumn(postEl, grp);
-    if (!insertedNatively) {
-      const panel = getOrCreatePanel(postEl);
-      panel.insertBefore(grp, panel.firstChild);
-    }
-  } else {
-    // Facebook (and any other platform): always insert a panel block below
-    // the action row — works for both labeled and compact icon-only layouts.
-    const panel = getOrCreatePanel(postEl);
-    if (!panel.querySelector(":scope > .haqq-btn-group")) {
-      panel.insertBefore(grp, panel.firstChild);
-    }
-  }
 }
 
 // ─── VIDEO URL FALLBACK (used only when frame capture isn't possible) ─
@@ -556,99 +600,95 @@ function makeBtn(type, postEl, content) {
       if (type === "aimedia") {
         let frames = null;
 
-        // Step 1: Scroll the post into view to trigger Facebook's lazy video loading
+        // ── APPROACH: Screenshot the visible post area ──────────────────────────
+        // Facebook renders feed videos via GPU compositing — the <video> element
+        // is inaccessible or hidden. We don't need it.
+        // chrome.tabs.captureVisibleTab() captures fully-composited screen pixels,
+        // so whatever the user sees (image, video frame, thumbnail) is captured.
+        //
+        // For VIDEO posts: detect video player controls in the DOM (seek bar,
+        // Play/Pause button) — these ARE accessible even when <video> is not.
+        // Take multiple screenshots spaced 1.5s apart so the playing video
+        // naturally advances to different frames between captures.
+        //
+        // For IMAGE posts: 1 screenshot is enough.
+
+        // Step 1: Bring the post into view and let the browser composite it
         postEl.scrollIntoView({ block: "center", behavior: "instant" });
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 700)); // wait for GPU composite
 
-        // Step 2: Find the video element — it may not exist yet (lazy-loaded)
-        let vid = postEl.querySelector("video");
-        if (!vid) {
-          log("aimedia — no <video> in DOM yet, waiting up to 5s for lazy-load...");
-          // Try hovering/interacting to trigger lazy video insertion
-          const tileLink = postEl.querySelector("a") || postEl;
-          for (const ev of ["mouseover", "mouseenter", "pointerenter"]) {
-            tileLink.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true }));
-          }
-          // Also try clicking to trigger video player
-          try {
-            const playBtn = postEl.querySelector('[aria-label*="play" i], [aria-label*="Play" i], [role="button"]');
-            if (playBtn) playBtn.click();
-          } catch (_) {}
+        // Step 2: Detect whether this is a video or image post by looking at DOM signals
+        // (player controls, English & Arabic aria-labels, video tags) — not relying solely on <video> element.
+        const isVideoPost = !!(
+          postEl.querySelector('[aria-label*="Play" i]') ||
+          postEl.querySelector('[aria-label*="Pause" i]') ||
+          postEl.querySelector('[aria-label*="Mute" i]') ||
+          postEl.querySelector('[aria-label*="Unmute" i]') ||
+          postEl.querySelector('[aria-label*="Video" i]') ||
+          postEl.querySelector('[aria-label*="تشغيل"]') ||
+          postEl.querySelector('[aria-label*="إيقاف"]') ||
+          postEl.querySelector('[aria-label*="كتم"]') ||
+          postEl.querySelector('[aria-label*="فيديو"]') ||
+          postEl.querySelector('[aria-label*="صوت"]') ||
+          postEl.querySelector('[role="slider"]') ||
+          postEl.querySelector("video") ||
+          postEl.querySelector("[data-video-id]") ||
+          !!freshContent.videoUrl
+        );
 
-          for (let i = 0; i < 10; i++) {
-            await new Promise(r => setTimeout(r, 500));
-            vid = postEl.querySelector("video");
-            if (vid) {
-              log(`aimedia — <video> appeared after ${(i + 1) * 500}ms`);
-              break;
-            }
-          }
+        log(`aimedia — isVideoPost=${isVideoPost}`);
+
+        // Try to trigger play/unmute if a <video> element exists so frames advance naturally
+        const videoEl = postEl.querySelector("video");
+        if (videoEl && isVideoPost) {
+          videoEl.muted = true;
+          try { await videoEl.play().catch(() => {}); } catch (_) {}
+          await new Promise(r => setTimeout(r, 400));
         }
 
-        // Step 3: If we found a video element, try to capture frames from it
-        if (vid) {
-          log(`aimedia — found <video>, readyState=${vid.readyState}, duration=${vid.duration}, src=${(vid.src || "").slice(0, 60)}`);
+        // Step 3: Take screenshots of the post area.
+        // For video: take up to 6 screenshots with 1.5s delays so the playing
+        // video advances naturally between captures.
+        // For image: 1 screenshot is enough.
+        const captureCount = isVideoPost ? 6 : 1;
+        const captureDelay = 1500; // ms between frames for video posts
 
-          // Try to get the video to start playing / loading data
-          vid.muted = true;
-          vid.scrollIntoView({ block: "center", behavior: "instant" });
-          try { await vid.play().catch(() => {}); } catch (_) {}
+        const captured = [];
+        for (let i = 0; i < captureCount; i++) {
+          if (i > 0) await new Promise(r => setTimeout(r, captureDelay));
 
-          // Wait for video data, but don't give up if this fails
-          const ready = await waitForRealVideoData(vid, 10000);
-          log(`aimedia — waitForRealVideoData returned ${ready}, readyState=${vid.readyState}`);
+          // Make sure the post is still in view between captures
+          if (!postEl.isConnected) break;
+          postEl.scrollIntoView({ block: "center", behavior: "instant" });
+          await new Promise(r => setTimeout(r, 150));
 
-          // Attempt captureVisibleTab even if not "ready" — the video
-          // may be visually rendering frames via MSE even when readyState
-          // reports a low value.
           try {
-            const captured = await captureFramesFromLiveVideo(vid, 8);
-            if (captured && captured.length > 0) {
-              frames = captured.map(f => f.dataUrl);
-              log(`aimedia — captured ${frames.length} frames via captureVisibleTab!`);
+            const frame = await captureElementRect(postEl);
+            if (frame) {
+              captured.push(frame);
+              log(`aimedia — ✅ frame ${i + 1}/${captureCount} captured`);
             } else {
-              log("aimedia — captureFramesFromLiveVideo returned empty");
+              log(`aimedia — ⚠️ frame ${i + 1}/${captureCount} returned null (rect invalid or off-screen)`);
             }
           } catch (e) {
-            log("aimedia — frame capture failed:", e.message);
-            frames = null;
+            log(`aimedia — ❌ frame ${i + 1}/${captureCount} error: ${e.message}`);
           }
-        } else {
-          log("aimedia — no <video> element found even after waiting");
         }
 
-        // Step 4: Build finalContent — either with frames or with fallback URL/permalink
+        if (captured.length > 0) {
+          frames = captured;
+          log(`aimedia — ✅ successfully captured ${frames.length} frame(s) via postEl screenshot`);
+        } else {
+          log("aimedia — ⚠️ all frame captures failed or returned null");
+        }
+
+        // Step 4: Build finalContent — use captured frames, or fall back to image URL
         if (frames && frames.length) {
           finalContent = { ...finalContent, frames, videoUrl: null, postPermalink: null };
         } else {
-          // Extract post permalink from the post element for backend fallback
-          let postPermalink = null;
-          const allLinks = postEl.querySelectorAll("a[href]");
-          for (const a of allLinks) {
-            const href = a.getAttribute("href") || "";
-            // Facebook video/post permalink patterns
-            if (/\/(watch|videos|reel|posts|permalink)\//.test(href) ||
-                /\/\d+\/?$/.test(href) ||
-                /story_fbid/.test(href)) {
-              postPermalink = new URL(href, location.origin).href;
-              break;
-            }
-          }
-
-          finalContent = {
-            ...finalContent,
-            postPermalink: postPermalink,
-          };
-
-          if (vid) {
-            const poster = vid.getAttribute("poster");
-            if (poster) finalContent.videoUrl = poster;
-          }
-
-          log("aimedia — no client-side frames, sending fallback:", {
-            hasPostPermalink: !!postPermalink,
-            hasVideoUrl: !!finalContent.videoUrl,
-          });
+          log("aimedia — ⚠️ no client-side frames captured; sending image/video URL as fallback");
+          // finalContent already has imageUrl / videoUrl from extractAll()
+          // The backend will download the poster/thumbnail as a single-image fallback
         }
 
         log("aimedia — sending:", {
@@ -656,7 +696,6 @@ function makeBtn(type, postEl, content) {
           numFrames: frames ? frames.length : 0,
           hasVideoUrl: !!finalContent.videoUrl,
           hasImageUrl: !!finalContent.imageUrl,
-          hasPostPermalink: !!finalContent.postPermalink,
         });
       }
 

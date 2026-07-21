@@ -42,7 +42,7 @@ let stats = {
 };
 
 // ─── ROUTER ───────────────────────────────────────────────────────────────────
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
       switch (msg.type) {
@@ -57,12 +57,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
         case "HAQQ_CAPTURE_TAB":
           // Used by content.js to capture the visible tab for video frame extraction.
-          // This bypasses CORS/tainted-canvas because captureVisibleTab captures
-          // composited pixels from the GPU, not DOM element data.
+          // Bypasses CORS by capturing composited GPU pixels.
           try {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            if (!tab?.id) return sendResponse({ error: "No active tab" });
-            const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+            let windowId = sender.tab?.windowId;
+            if (windowId === undefined) {
+              const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+              windowId = tab?.windowId;
+            }
+            const dataUrl = await chrome.tabs.captureVisibleTab(windowId, {
               format: "jpeg",
               quality: 85,
             });
@@ -193,25 +195,25 @@ async function verifyText({ text, lang }) {
 }
 
 // ─── AI-GENERATED / MANIPULATED MEDIA DETECTION ───────────────────────────────
-// Sends whichever of imageUrl / videoUrl are present to the backend's
-// GPU-accelerated detection ensemble (/detect-media). The backend decides
-// internally how to weight image vs. video when both are supplied (e.g. a
-// video's poster frame plus the video itself).
-// Expected response shape: { verdict, confidence, explanation, mediaType }
-// where verdict is one of: real | ai_generated | manipulated | inconclusive
 async function detectMedia({ imageUrl, videoUrl, postPermalink, frames }) {
   if (!imageUrl && !videoUrl && !postPermalink && !(frames && frames.length))
     return result("inconclusive", 0, "لا توجد وسائط لتحليلها.", []);
 
-  const cKey = "media::" + (videoUrl || postPermalink || imageUrl || "frames");
-  if (cache.has(cKey))    return cache.get(cKey);
-  if (inFlight.has(cKey)) return inFlight.get(cKey);
+  // NOTE: Do NOT cache frame-based requests — captured frames are always
+  // unique live snapshots. Only cache URL-based lookups (same URL → same result).
+  const hasFrames = frames && frames.length > 0;
+  const cKey = hasFrames
+    ? null  // no caching
+    : "media::" + (videoUrl || postPermalink || imageUrl || "");
+
+  if (cKey && cache.has(cKey))    return cache.get(cKey);
+  if (cKey && inFlight.has(cKey)) return inFlight.get(cKey);
 
   const promise = (async () => {
     try {
       // Convert data URLs to raw base64 for the backend
       let extractedFrames = null;
-      if (frames && frames.length) {
+      if (hasFrames) {
         extractedFrames = frames.map(f => {
           if (f.startsWith("data:")) return f.split(",")[1];
           return f;
@@ -237,20 +239,22 @@ async function detectMedia({ imageUrl, videoUrl, postPermalink, frames }) {
 
       const out = await res.json();
 
-      cache.set(cKey, out);
-      inFlight.delete(cKey);
+      if (cKey) {
+        cache.set(cKey, out);
+        inFlight.delete(cKey);
+      }
       stats.total++;
       stats[out.verdict] = (stats[out.verdict] || 0) + 1;
       return out;
 
     } catch (e) {
       console.warn("[HAQQ] /detect-media error:", e.message);
-      inFlight.delete(cKey);
+      if (cKey) inFlight.delete(cKey);
       return result("inconclusive", 0, "⚠️ خطأ في الاتصال بخادم كشف الوسائط", []);
     }
   })();
 
-  inFlight.set(cKey, promise);
+  if (cKey) inFlight.set(cKey, promise);
   return promise;
 }
 
