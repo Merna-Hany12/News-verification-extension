@@ -309,7 +309,7 @@ News-verification-extension/
 │   │   └── builder.py                # Graph definition, node wiring, run_verify()
 │   │
 │   ├── nodes/                        # Pipeline nodes
-│   │   ├── classify.py               # Zero-shot 3-class classification
+│   │   ├── classify.py               # SetFit 4-class classification (news / historical_scientific / medical / non_news)
 │   │   ├── search.py                 # Keyword extraction + multi-API search
 │   │   └── verify.py                 # LLM verification + scoring
 │   │
