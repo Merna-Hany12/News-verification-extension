@@ -33,7 +33,6 @@ DEFAULT_DATASET = Path(__file__).parent / "benchmark_dataset.csv"
 # benchmark.py — add this function after imports
 
 def _initialize_pipeline():
-    from transformers import pipeline as hf_pipeline
     import easyocr
     from backend.nodes import classify
 
@@ -41,11 +40,9 @@ def _initialize_pipeline():
         print("[benchmark] Classifier already initialized — skipping.")
         return
 
-    print("[benchmark] Loading classifier...")
-    classify.classifier = hf_pipeline(
-        "zero-shot-classification",
-        model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli",
-    )
+    print("[benchmark] Loading SetFit classifier...")
+    from setfit import SetFitModel
+    classify.classifier = SetFitModel.from_pretrained("darck-12/news-classification-minilm")
     print(f"[benchmark] Classifier injected: {classify.classifier is not None} ✅")
 
     print("[benchmark] Loading EasyOCR...")

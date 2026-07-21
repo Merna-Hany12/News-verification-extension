@@ -605,8 +605,14 @@ async def _download_single_image(url: str) -> Image.Image:
     return Image.open(BytesIO(resp.content)).convert("RGB")
 
 
+from backend.observability.axiom_logger import axiom_logger, extract_platform
+import time
+
 @router.post("/detect-media")
 async def detect_media(request: DetectMediaRequest, req: Request):
+    start_time = time.time()
+    request_id = getattr(req.state, 'request_id', 'unknown')
+    
     yunet = req.app.state.yunet
     gend_model = req.app.state.gend_model
     aigc_pipeline = req.app.state.aigc_pipeline
@@ -847,4 +853,16 @@ async def detect_media(request: DetectMediaRequest, req: Request):
         "frames": frame_results,
         "saved_frames_dir": saved_frames_dir,
     }
+    
+    elapsed_ms = (time.time() - start_time) * 1000
+    axiom_logger.log_media_detection_event({
+        "request_id": request_id,
+        "media_type": "video" if target_url and not extraction_method == "single-image" else "image",
+        "detection_result": result["verdict"],
+        "confidence": result["confidence"],
+        "latency_ms": elapsed_ms,
+        "model_used": "GenD" if faces_detected else "SigLIP",
+        "platform": extract_platform(request.post_permalink or request.video_url or request.image_url)
+    })
+    
     return result

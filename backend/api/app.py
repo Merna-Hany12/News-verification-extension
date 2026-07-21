@@ -31,11 +31,9 @@ import torch
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("LOADING CLASSIFIER...")
-    classifier = pipeline(
-        "zero-shot-classification",
-        model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli",
-    )
+    print("LOADING CLASSIFIER (SetFit)...")
+    from setfit import SetFitModel
+    classifier = SetFitModel.from_pretrained("darck-12/news-classification-minilm")
     app.state.classifier = classifier
     print("CLASSIFIER LOADED ✅")
 
@@ -95,8 +93,23 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Ensure any remaining events in the buffer are flushed to Axiom on shutdown
+    from backend.observability.axiom_logger import axiom_logger
+    print("FLUSHING AXIOM LOGGER...")
+    try:
+        await axiom_logger.flush()
+    except Exception as e:
+        print(f"Error flushing Axiom logger on shutdown: {e}")
+
+
+from backend.observability.langsmith_config import setup_langsmith
+from backend.observability.middleware import ObservabilityMiddleware
+
+setup_langsmith()
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(ObservabilityMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

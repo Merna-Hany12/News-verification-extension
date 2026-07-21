@@ -121,16 +121,13 @@ async def test_full_pipeline():
     print("TEST 4: Full Medical Verification Pipeline")
     print("="*60)
 
-    from transformers import pipeline
     from backend.nodes import classify
     from backend.graph.builder import build_graph, run_verify
 
     if classify.classifier is None:
-        print("  Loading classifier model...")
-        classify.classifier = pipeline(
-            "zero-shot-classification",
-            model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli",
-        )
+        print("  Loading SetFit classifier model...")
+        from setfit import SetFitModel
+        classify.classifier = SetFitModel.from_pretrained("darck-12/news-classification-minilm")
         print("  Classifier loaded")
 
     graph = build_graph()
