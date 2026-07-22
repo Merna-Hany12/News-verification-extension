@@ -45,6 +45,11 @@ let stats = {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     try {
+      const storage = await chrome.storage.local.get("news_lang");
+      if (msg.payload && typeof msg.payload === "object") {
+        msg.payload.lang = storage.news_lang || "ar";
+      }
+
       switch (msg.type) {
         case "HAQQ_VERIFY_CONTENT":
           return sendResponse({ data: await verifyContentBackend(msg.payload) });
@@ -139,7 +144,8 @@ async function verifyContentBackend({ text, imageUrl, lang }) {
     } catch (e) {
       console.warn("[HAQQ] /verify-content error:", e.message);
       inFlight.delete(cKey);
-      return result("unverified", 0, "⚠️ خطأ في الاتصال بخادم التحقق", []);
+      const errMsg = lang === "en" ? "⚠️ Error connecting to verification server" : "⚠️ خطأ في الاتصال بخادم التحقق";
+      return result("unverified", 0, errMsg, []);
     }
   })();
 
@@ -153,8 +159,10 @@ async function verifyContentBackend({ text, imageUrl, lang }) {
 // Kept for any caller that wants text-only verification without the
 // merged OCR-fallback behavior /verify-content now provides.
 async function verifyText({ text, lang }) {
-  if (!text || text.trim().length < 20)
-    return result("unverified", 0, "النص قصير جداً للتحقق.", []);
+  if (!text || text.trim().length < 20) {
+    const shortMsg = lang === "en" ? "Text is too short to verify." : "النص قصير جداً للتحقق.";
+    return result("unverified", 0, shortMsg, []);
+  }
 
   const cKey = "text::" + text.trim().slice(0, 100);
   if (cache.has(cKey))    return cache.get(cKey);
@@ -184,7 +192,8 @@ async function verifyText({ text, lang }) {
     } catch (e) {
       console.warn("[HAQQ] /verify error:", e.message);
       inFlight.delete(cKey);
-      return result("unverified", 0, "⚠️ خطأ في الاتصال بخادم التحقق", []);
+      const errMsg = lang === "en" ? "⚠️ Error connecting to verification server" : "⚠️ خطأ في الاتصال بخادم التحقق";
+      return result("unverified", 0, errMsg, []);
     }
   })();
 
@@ -199,9 +208,24 @@ async function verifyText({ text, lang }) {
 // video's poster frame plus the video itself).
 // Expected response shape: { verdict, confidence, explanation, mediaType }
 // where verdict is one of: real | ai_generated | manipulated | inconclusive
-async function detectMedia({ imageUrl, videoUrl, postPermalink, frames, platform }) {
-  if (!imageUrl && !videoUrl && !postPermalink && !(frames && frames.length))
-    return result("inconclusive", 0, "لا توجد وسائط لتحليلها.", []);
+
+async function detectMedia({
+  imageUrl,
+  videoUrl,
+  postPermalink,
+  frames,
+  platform,
+  lang,
+}) {
+  if (!imageUrl && !videoUrl && !postPermalink && !(frames && frames.length)) {
+    const emptyMsg =
+      lang === "en"
+        ? "No media available to analyze."
+        : "لا توجد وسائط لتحليلها.";
+
+    return result("inconclusive", 0, emptyMsg, []);
+  }
+
 
   const cKey = "media::" + (videoUrl || postPermalink || imageUrl || "frames");
   if (cache.has(cKey))    return cache.get(cKey);
@@ -231,6 +255,7 @@ async function detectMedia({ imageUrl, videoUrl, postPermalink, frames, platform
           post_permalink: postPermalink || null,
           extracted_frames: extractedFrames || null,
           platform: platform || "generic"
+          lang: lang || "ar"
         }),
       });
 

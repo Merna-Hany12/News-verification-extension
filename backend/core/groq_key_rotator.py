@@ -28,6 +28,13 @@ import asyncio
 import itertools
 import logging
 from dataclasses import dataclass
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
 
 from groq import AsyncGroq, RateLimitError, APIStatusError
 
@@ -73,6 +80,7 @@ class GroqKeyRotator:
             "Groq key #%d rate-limited, cooling down %.0fs", idx, cooldown
         )
 
+    @traceable(name="groq_rotator_call", run_type="llm")
     async def chat_completion(self, max_retries: int | None = None, max_wait_s: float = 8.0, **kwargs):
         """
         Drop-in-ish replacement for `await client.chat.completions.create(**kwargs)`,

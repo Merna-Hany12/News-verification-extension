@@ -28,8 +28,14 @@ router = APIRouter()
 
 # ─── Route Handler ──────────────────────────────────────────────────────────
 
+from backend.observability.axiom_logger import axiom_logger, extract_platform
+import time
+
 @router.post("/detect-media")
 async def detect_media(request: DetectMediaRequest, req: Request):
+    start_time = time.time()
+    request_id = getattr(req.state, 'request_id', 'unknown')
+    
     yunet = req.app.state.yunet
     gend_model = req.app.state.gend_model
     platform = request.platform or "generic"
@@ -117,7 +123,8 @@ async def detect_media(request: DetectMediaRequest, req: Request):
             raise HTTPException(status_code=400, detail=f"Could not download image: {e}")
 
     else:
-        return {"verdict": "inconclusive", "confidence": 0.0, "explanation": "لا توجد وسائط لتحليلها.", "sources": []}
+        msg = "No media available to analyze." if request.lang == "en" else "لا توجد وسائط لتحليلها."
+        return {"verdict": "inconclusive", "confidence": 0.0, "explanation": msg, "sources": []}
 
     saved_frames_dir = None
 
@@ -287,7 +294,10 @@ async def detect_media(request: DetectMediaRequest, req: Request):
     # isn't read the same way as a full video analysis.
     explanation = result["explanation"]
     if extraction_method == "single-image":
-        explanation += " ⚠️ (تحليل الصورة المصغّرة فقط — لم يتم تحميل الفيديو الفعلي بعد، الدقة أقل من تحليل كامل)"
+        if request.lang == "en":
+            explanation += " ⚠️ (Thumbnail analyzed only — full video extraction failed or skipped, accuracy is lower)"
+        else:
+            explanation += " ⚠️ (تحليل الصورة المصغّرة فقط — لم يتم تحميل الفيديو الفعلي بعد، الدقة أقل من تحليل كامل)"
     result["explanation"] = explanation
 
     # ── 8. Per-Frame Breakdown ────────────────────────────────────────────
@@ -331,4 +341,16 @@ async def detect_media(request: DetectMediaRequest, req: Request):
         "effective_df_threshold": effective_df_threshold,
         "avg_crop_height": float(avg_crop_height),
     }
+    
+    elapsed_ms = (time.time() - start_time) * 1000
+    axiom_logger.log_media_detection_event({
+        "request_id": request_id,
+        "media_type": "video" if target_url and not extraction_method == "single-image" else "image",
+        "detection_result": result["verdict"],
+        "confidence": result["confidence"],
+        "latency_ms": elapsed_ms,
+        "model_used": "GenD" if faces_detected else "SigLIP",
+        "platform": extract_platform(request.post_permalink or request.video_url or request.image_url)
+    })
+    
     return result

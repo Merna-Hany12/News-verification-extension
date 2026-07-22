@@ -41,7 +41,7 @@ def _log_trusted(articles: list[dict], tag: str) -> None:
 
 
 # Personal-opinion detection ---------------------------------------------
-# The upstream classifier occasionally mislabels subjective, first-person
+# The SetFit classifier occasionally mislabels subjective, first-person
 # opinion posts ("أعتقد أن الحكومة مقصرة", "I think this policy is terrible")
 # as verifiable news/medical/general claims. There's no factual claim to
 # check evidence against in these cases, so running them through source
@@ -74,6 +74,15 @@ def _looks_like_personal_opinion(text: str) -> bool:
     return any(m in blob for m in _OPINION_MARKERS_AR) or any(m in blob for m in _OPINION_MARKERS_EN)
 
 
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+@traceable(name="llm_verify", run_type="chain")
 async def llm_verify_node(state: HAQQState) -> HAQQState:
     claim        = state["text"]
     articles     = state["articles"]
@@ -145,6 +154,7 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
     )
 
     if content_type == "medical":
+        sentence_instruction = "One short English sentence describing what the medical sources say." if lang == "en" else "جملة عربية واحدة قصيرة تصف ما تقوله المصادر الطبية."
         system_prompt = (
             "أنت محقق معلومات طبية متخصص. مهمتك الحكم على صحة الادعاء الطبي علمياً.\n\n"
             "قاعدة حاسمة: أنت تقيّم هل الادعاء الطبي صحيح علمياً أم لا — وليس هل المصادر تتحدث عنه.\n"
@@ -154,7 +164,7 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
             "→ الحكم هو CONFIRMED.\n\n"
             "أجب بهذا الشكل الحرفي فقط — أربعة أسطر، بدون أي نص إضافي:\n"
             "السطر الأول: كلمة واحدة: CONFIRMED أو UNCONFIRMED أو CONTRADICTED\n"
-            "السطر الثاني: جملة عربية واحدة قصيرة تصف ما تقوله المصادر الطبية.\n"
+            f"السطر الثاني: {sentence_instruction}\n"
             "السطر الثالث: كلمة واحدة فقط: TOPIC_MATCH أو TOPIC_MISMATCH.\n\n"
             "تعريفات:\n"
             "- CONFIRMED: الادعاء الطبي صحيح علمياً — مصادر طبية موثوقة تؤكد أن العلاج فعال أو أن السبب حقيقي.\n"
@@ -171,12 +181,13 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
             "مهم: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً." + _OPINION_LINE_INSTRUCTIONS
         )
     elif content_type == "historical_scientific":
+        sentence_instruction = "One short English sentence describing what the sources say about this topic." if lang == "en" else "جملة عربية واحدة قصيرة تصف ما تقوله المصادر عن هذا الموضوع."
         system_prompt = (
             "أنت محقق حقائق علمية وتاريخية. مهمتك تقييم ما إذا كانت المصادر المتاحة "
             "تؤكد الادعاء العلمي أو التاريخي أم لا.\n\n"
             "أجب بهذا الشكل الحرفي فقط — أربعة أسطر، بدون أي نص إضافي:\n"
             "السطر الأول: كلمة واحدة: CONFIRMED أو UNCONFIRMED أو CONTRADICTED\n"
-            "السطر الثاني: جملة عربية واحدة قصيرة تصف ما تقوله المصادر عن هذا الموضوع.\n"
+            f"السطر الثاني: {sentence_instruction}\n"
             "السطر الثالث: كلمة واحدة فقط: TOPIC_MATCH أو TOPIC_MISMATCH.\n\n"
             "تعريفات:\n"
             "- CONFIRMED: مصدران أو أكثر موثوقان يؤكدان المعلومة بتفاصيل متطابقة.\n"
@@ -187,11 +198,12 @@ async def llm_verify_node(state: HAQQState) -> HAQQState:
             "مهم: يجب أن تكون الاستجابة ثلاثة أسطر فقط دائماً، مهما كانت الإجابة." + _OPINION_LINE_INSTRUCTIONS
         )
     else:
+        sentence_instruction = "One short English sentence describing what the sources say about this topic." if lang == "en" else "جملة عربية واحدة قصيرة تصف ما تقوله المصادر عن هذا الموضوع."
         system_prompt = (
             "أنت محقق أخبار محترف. مهمتك تقييم ما إذا كانت المقالات تؤكد الادعاء أم لا.\n\n"
             "أجب بهذا الشكل الحرفي فقط — أربعة أسطر، بدون أي نص إضافي:\n"
             "السطر الأول: كلمة واحدة: CONFIRMED أو UNCONFIRMED أو CONTRADICTED\n"
-            "السطر الثاني: جملة عربية واحدة قصيرة تصف ما تقوله المصادر عن هذا الموضوع.\n"
+            f"السطر الثاني: {sentence_instruction}\n"
             "السطر الثالث: كلمة واحدة فقط: TOPIC_MATCH أو TOPIC_MISMATCH.\n\n"
             "تعريفات:\n"
             "- CONFIRMED: مقالتان أو أكثر تتناول نفس الحدث بتفاصيل متطابقة.\n"
