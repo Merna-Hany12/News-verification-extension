@@ -870,6 +870,7 @@ async function verifyMedia(content) {
             videoUrl: content.videoUrl || null,
             postPermalink: content.postPermalink || null,
             frames: content.frames || null,
+            platform: PLATFORM,
           },
         },
         (res) => {

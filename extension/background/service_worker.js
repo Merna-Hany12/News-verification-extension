@@ -199,7 +199,7 @@ async function verifyText({ text, lang }) {
 // video's poster frame plus the video itself).
 // Expected response shape: { verdict, confidence, explanation, mediaType }
 // where verdict is one of: real | ai_generated | manipulated | inconclusive
-async function detectMedia({ imageUrl, videoUrl, postPermalink, frames }) {
+async function detectMedia({ imageUrl, videoUrl, postPermalink, frames, platform }) {
   if (!imageUrl && !videoUrl && !postPermalink && !(frames && frames.length))
     return result("inconclusive", 0, "لا توجد وسائط لتحليلها.", []);
 
@@ -229,7 +229,8 @@ async function detectMedia({ imageUrl, videoUrl, postPermalink, frames }) {
           image_url: imageUrl || null, 
           video_url: videoUrl || null,
           post_permalink: postPermalink || null,
-          extracted_frames: extractedFrames || null
+          extracted_frames: extractedFrames || null,
+          platform: platform || "generic"
         }),
       });
 

@@ -87,10 +87,36 @@ async def lifespan(app: FastAPI):
     
     app.state.gend_model = gend_model
 
+    print("LOADING CONVNEXT AI-VS-HUMAN MODEL...")
+    import timm
+    import torchvision.transforms as T
+    
+    CONVNEXT_REPO_ID = "xRayon/convnext-ai-images-detector"
+    CONVNEXT_CKPT_FILENAME = "AI Images Detector/checkpoints/checkpoint_phase2.pth"
+    
+    try:
+        convnext_ckpt_path = hf_hub_download(repo_id=CONVNEXT_REPO_ID, filename=CONVNEXT_CKPT_FILENAME)
+        convnext_model = timm.create_model("convnextv2_base", pretrained=False, num_classes=2)
+        ckpt = torch.load(convnext_ckpt_path, map_location="cpu")
+        convnext_model.load_state_dict(ckpt["model"])
+        convnext_model.eval()
+        convnext_model.to("cpu")
+        app.state.convnext_model = convnext_model
+        print("CONVNEXT MODEL LOADED ✅")
+    except Exception as e:
+        print(f"FAILED TO LOAD CONVNEXT MODEL: {e}")
+        raise e
+        
+    _convnext_mean = (0.485, 0.456, 0.406)
+    _convnext_std = (0.229, 0.224, 0.225)
+    convnext_transform = T.Compose([
+        T.Resize(288, interpolation=T.InterpolationMode.LANCZOS),
+        T.CenterCrop(256),
+        T.ToTensor(),
+        T.Normalize(_convnext_mean, _convnext_std),
+    ])
+    app.state.convnext_transform = convnext_transform
 
-    print("LOADING AIGC MODEL (SigLIP)...")
-    aigc_pipeline = pipeline("image-classification", model="Ateeqq/ai-vs-human-image-detector")
-    app.state.aigc_pipeline = aigc_pipeline
     print("ALL MODELS LOADED ✅")
 
     yield
