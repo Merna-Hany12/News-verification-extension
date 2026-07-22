@@ -79,7 +79,9 @@ def build_graph() -> Any:
     return compiled
 
 
-async def run_verify(graph, text: str, lang: str) -> dict:
+from backend.observability.langsmith_config import get_langsmith_config
+
+async def run_verify(graph, text: str, lang: str, request_id: str = "unknown") -> dict:
     initial_state: HAQQState = {
         "text":           text,
         "lang":           lang,
@@ -99,9 +101,13 @@ async def run_verify(graph, text: str, lang: str) -> dict:
         "explanation":    "",
         "sources":        [],
     }
-    final = await graph.ainvoke(initial_state)
+    
+    ls_config = get_langsmith_config(request_id, pipeline="traditional")
+    final = await graph.ainvoke(initial_state, config=ls_config)
+    
     return {
         "verdict":           final.get("verdict",     "unverified"),
+        "content_type":      final.get("content_type", "unknown"),
         "confidence":        final.get("confidence",  0.0),
         "explanation":       final.get("explanation", ""),
         "sources":           final.get("sources",     []),

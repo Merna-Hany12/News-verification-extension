@@ -1,5 +1,5 @@
 from backend.core.config import (
-    CLASSIFY_LABELS, LABEL_TO_TYPE,
+    LABEL_TO_TYPE,
     MEDICAL_KEYWORDS_EN, MEDICAL_KEYWORDS_AR, MEDICAL_KEYWORD_THRESHOLD,
 )
 from backend.core.state import HAQQState
@@ -12,10 +12,9 @@ def _detect_medical(text: str) -> bool:
     """
     Keyword-based medical content detection.
 
-    Why not use the zero-shot classifier? Because "medical" and "historical/scientific"
-    overlap too heavily — the mDeBERTa model classifies "smoking causes lung cancer"
-    as scientific (which is technically correct, but we want to route it through
-    the PubMed search path for better medical sources).
+    Why do we still have keyword-based medical detection? As a secondary check/override
+    safeguard, in case the SetFit classifier misclassifies a borderline medical query
+    (which we want to route through the PubMed search path for better medical sources).
 
     Returns True if the text contains ≥ MEDICAL_KEYWORD_THRESHOLD medical keywords.
     """
@@ -40,9 +39,9 @@ def _detect_medical(text: str) -> bool:
 def classify_node(state: HAQQState) -> HAQQState:
     """
     Two-stage classification:
-      Stage 1: Three-class zero-shot (news / historical_scientific / non_news)
+      Stage 1: Four-class SetFit model (news / historical_scientific / medical / non_news)
       Stage 2: Keyword-based medical detection — overrides to "medical" if
-               the text contains enough medical keywords
+               the text contains enough medical keywords (as a safeguard)
 
     content_type values: "news" | "historical_scientific" | "medical" | "non_news"
     """
@@ -63,18 +62,17 @@ def classify_node(state: HAQQState) -> HAQQState:
         if classifier is None:
             raise RuntimeError("Classifier has not been initialized.")
 
-        out     = classifier(text[:500], CLASSIFY_LABELS)
-        best_label_text = out["labels"][0]
-        best_score      = float(out["scores"][0])
+        text_truncated = text[:500]
+        probs = classifier.predict_proba([text_truncated])[0]
+        pred_idx = int(classifier.predict([text_truncated])[0])
 
-        # Map the label string back to an index
-        label_index = CLASSIFY_LABELS.index(best_label_text)
-        content_type = LABEL_TO_TYPE[label_index]
+        content_type = LABEL_TO_TYPE[pred_idx]
+        best_score = float(probs[pred_idx])
 
-        # Collect all scores for logging
-        scores = dict(zip(out["labels"], out["scores"]))
-        news_score     = float(scores.get(CLASSIFY_LABELS[0], 0.0))
-        non_news_score = float(scores.get(CLASSIFY_LABELS[2], 0.0))
+        # We can map news_score and non_news_score
+        # Class 0, 1, 2 are news-like. Class 3 is non_news.
+        news_score = float(probs[0] + probs[1] + probs[2])
+        non_news_score = float(probs[3])
 
         # Ambiguity guard: if top score < 0.45, treat as news to avoid false negatives
         if best_score < 0.45:
@@ -82,7 +80,7 @@ def classify_node(state: HAQQState) -> HAQQState:
 
         # ── Stage 2: Medical keyword override ────────────────────────────
         # If the text contains medical keywords, override to "medical"
-        # regardless of what the zero-shot classifier said (unless non_news
+        # regardless of what the SetFit classifier predicted (unless non_news
         # with high confidence — casual health chat shouldn't trigger medical)
         is_medical = _detect_medical(text)
         if is_medical and not (content_type == "non_news" and best_score > 0.60):

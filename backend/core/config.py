@@ -76,27 +76,16 @@ MEDICAL_TRUSTED: set[str] = {
     # Arabic medical
     "webteb", "altibbi", "dailymedicalinfo", "sehatok",
 }
-# Labels for the three-class zero-shot classifier
-# NOTE: Medical detection is handled separately via keyword matching (MEDICAL_KEYWORDS)
-# because the zero-shot model can't reliably separate "medical" from "historical/scientific".
-CLASSIFY_LABELS = [
-    # class 0 — news
-    "breaking news report journalism media coverage current event announcement politics",
-    # class 1 — historical / scientific
-    "historical fact scientific discovery research study academic ancient history science",
-    # class 2 — non-news
-    "personal opinion joke meme social media post casual conversation gossip advertisement",
-]
-
-# Map label index → internal content_type string
+# Map SetFit label index -> internal content_type string
 LABEL_TO_TYPE = {
     0: "news",
     1: "historical_scientific",
-    2: "non_news",
+    2: "medical",
+    3: "non_news",
 }
 
 # ─── MEDICAL KEYWORD DETECTION ──────────────────────────────────────────────────
-# Used as a secondary check after zero-shot classification.
+# Used as a secondary check after SetFit classification.
 # If enough medical keywords are found, content_type is overridden to "medical".
 MEDICAL_KEYWORDS_EN: set[str] = {
     # Diseases & conditions

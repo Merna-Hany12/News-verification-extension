@@ -25,17 +25,16 @@ import cv2
 import os
 os.environ["USE_TF"] = "0"
 os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 from backend.models.gend import GenD
 import torch
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("LOADING CLASSIFIER...")
-    classifier = pipeline(
-        "zero-shot-classification",
-        model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli",
-    )
+    print("LOADING CLASSIFIER (SetFit)...")
+    from setfit import SetFitModel
+    classifier = SetFitModel.from_pretrained("darck-12/news-classification-minilm")
     app.state.classifier = classifier
     print("CLASSIFIER LOADED ✅")
 
@@ -45,7 +44,7 @@ async def lifespan(app: FastAPI):
     print("CLASSIFIER INJECTED TO GRAPH NODE ✅")
 
     print("LOADING EASYOCR (ar + en)...")
-    ocr_reader = easyocr.Reader(["ar", "en"], gpu=False)
+    ocr_reader = easyocr.Reader(["ar", "en"], gpu=False, verbose=False)
     app.state.ocr_reader = ocr_reader
     print("EASYOCR LOADED ✅")
 
@@ -95,8 +94,23 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Ensure any remaining events in the buffer are flushed to Axiom on shutdown
+    from backend.observability.axiom_logger import axiom_logger
+    print("FLUSHING AXIOM LOGGER...")
+    try:
+        await axiom_logger.flush()
+    except Exception as e:
+        print(f"Error flushing Axiom logger on shutdown: {e}")
+
+
+from backend.observability.langsmith_config import setup_langsmith
+from backend.observability.middleware import ObservabilityMiddleware
+
+setup_langsmith()
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(ObservabilityMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
