@@ -25,6 +25,7 @@ import cv2
 import os
 os.environ["USE_TF"] = "0"
 os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 from backend.models.gend import GenD
 import torch
 
@@ -43,7 +44,7 @@ async def lifespan(app: FastAPI):
     print("CLASSIFIER INJECTED TO GRAPH NODE ✅")
 
     print("LOADING EASYOCR (ar + en)...")
-    ocr_reader = easyocr.Reader(["ar", "en"], gpu=False)
+    ocr_reader = easyocr.Reader(["ar", "en"], gpu=False, verbose=False)
     app.state.ocr_reader = ocr_reader
     print("EASYOCR LOADED ✅")
 
