@@ -13,14 +13,11 @@ TARGET_HOST = os.environ.get("LOCUST_HOST", "https://ha-d1503bd4c01449c09f983bd5
 
 # ─── Per-Endpoint P95 Latency SLAs (milliseconds) ────────────────────────────
 # Used by the test to flag responses that exceed acceptable thresholds.
-# These are *warnings*, not hard failures — they show up in the custom
-# metrics summary so you can see how many requests breached SLA.
+# These 3 endpoints run 100% locally in the ECS container (0 external API credits).
 SLA_MS = {
-    "/health":          200,       # Should be near-instant
-    "/classify":        500,       # SetFit inference on CPU
-    "/ocr":             8_000,     # EasyOCR is CPU-heavy
-    "/verify-content":  35_000,    # Full LangGraph pipeline with external APIs
-    "/detect-media":    90_000,    # Playwright + GenD + SigLIP
+    "/health":          200,       # Near-instant heartbeat
+    "/classify":        500,       # SetFit ML inference on CPU
+    "/ocr":             8_000,     # EasyOCR processing on CPU
 }
 
 
@@ -31,15 +28,11 @@ ECS_CONTAINER_PORT = 8000
 
 
 # ─── Rate Limit Protection ───────────────────────────────────────────────────
-# Maximum requests-per-second PER endpoint to avoid burning external API quotas
-# during load testing. Set to 0 to disable throttling (full stress test mode).
-# These are enforced by a custom wait_time wrapper in locustfile.py.
+# No limits needed for these 3 endpoints as they consume zero external API quotas.
 MAX_RPS = {
-    "/health":          0,      # No limit — it's free
-    "/classify":        0,      # No external calls
-    "/ocr":             0,      # No external calls (just CPU)
-    "/verify-content":  2,      # Groq + 3 news APIs have per-minute limits
-    "/detect-media":    1,      # Playwright + heavy compute
+    "/health":          0,      # No limit — 100% free
+    "/classify":        0,      # No limit — 100% free (SetFit local ML model)
+    "/ocr":             0,      # No limit — 100% free (EasyOCR local model)
 }
 
 
@@ -50,7 +43,7 @@ PROFILES = {
         "users": 3,
         "spawn_rate": 1,
         "run_time": "2m",
-        "description": "Quick validation that all endpoints respond correctly",
+        "description": "Quick validation that all 3 local endpoints respond correctly",
     },
     "baseline": {
         "users": 10,
@@ -62,13 +55,13 @@ PROFILES = {
         "users": 30,
         "spawn_rate": 5,
         "run_time": "10m",
-        "description": "Moderate load — find the CPU saturation point",
+        "description": "Moderate load — test CPU saturation and Auto Scaling",
     },
     "stress": {
-        "users": 50,
+        "users": 60,
         "spawn_rate": 10,
         "run_time": "15m",
-        "description": "Stress test — find the breaking point",
+        "description": "Stress test — heavy CPU load to trigger ECS scale-out",
     },
     "spike": {
         "users": 100,
@@ -80,7 +73,4 @@ PROFILES = {
 
 
 # ─── Verdict Values (for response validation) ────────────────────────────────
-VALID_VERIFY_VERDICTS = {"fact", "fake", "unverified", "non_news"}
-VALID_TEXT_SOURCES = {"direct", "ocr", "ocr_retry", "none"}
-VALID_MEDIA_VERDICTS = {"real", "manipulated", "ai_generated", "inconclusive"}
 VALID_CLASSIFY_LABELS = {"news", "historical_scientific", "medical", "non_news"}
