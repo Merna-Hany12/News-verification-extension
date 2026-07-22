@@ -28,7 +28,7 @@ from payloads import (
     get_random_classify_payload,
     get_random_ocr_payload,
 )
-from config import SLA_MS, VALID_CLASSIFY_LABELS
+from config import TARGET_HOST, SLA_MS, VALID_CLASSIFY_LABELS
 
 logger = logging.getLogger("haqq_loadtest")
 
@@ -157,10 +157,7 @@ def _print_custom_metrics(environment, **kwargs):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class HealthCheckUser(HttpUser):
-    """
-    Continuously polls GET /health to establish baseline latency and verify
-    the container is alive.
-    """
+    host = TARGET_HOST
     weight = 1
     wait_time = between(1, 3)
 
@@ -202,6 +199,7 @@ class ClassifyUser(HttpUser):
     100% FREE — uses local ML model running on ECS Fargate CPU.
     Great for spiking CPU to test AWS ECS Auto Scaling!
     """
+    host = TARGET_HOST
     weight = 5
     wait_time = between(0.5, 2)
 
@@ -243,6 +241,7 @@ class OCRUser(HttpUser):
     Stresses the EasyOCR endpoint, which is CPU-bound and runs synchronously.
     100% FREE — uses local EasyOCR model running on ECS Fargate CPU.
     """
+    host = TARGET_HOST
     weight = 2
     wait_time = between(2, 6)
 
@@ -288,6 +287,7 @@ class MixedTrafficUser(HttpUser):
 
     Zero external API credits used!
     """
+    host = TARGET_HOST
     weight = 8
     wait_time = between(1, 4)
 

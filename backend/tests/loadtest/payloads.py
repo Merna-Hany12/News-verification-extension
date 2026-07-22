@@ -107,16 +107,16 @@ CLASSIFY_PAYLOADS = [
 
 OCR_PAYLOADS = [
     {
-        "image_url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/arabic.png",
-        "description": "Arabic text sample image",
+        "image_url": "https://scontent.fcai19-5.fna.fbcdn.net/v/t39.99422-6/752881070_1377623294252908_2406409165708529296_n.png?stp=dst-jpg_tt6&cstp=mx1080x1080&ctp=s1080x1080&_nc_cat=1&ccb=1-7&_nc_sid=127cfc&_nc_ohc=r7wrs6SuFo0Q7kNvwEVU9Uj&_nc_oc=AdqqdQbsUcZqGMwCXa7Dw3j90ZoGgrQvTuXDn8T_M5P0EQmx6jlvjPIDo6CVhHUOQN0&_nc_zt=14&_nc_ht=scontent.fcai19-5.fna&_nc_gid=fgMWFAqy1APt5J_Xp0LIog&_nc_ss=7b2a8&oh=00_AQAZMnXqokHro0CTFBWFPQmjx3IDev0GDBLDZil9vtkL2Q&oe=6A65FF47",
+        "description": "Introducing Gemini 3.6 Flash, 3.5 Flash-Lite, and 3.5 Flash Cyber ٨",
     },
     {
-        "image_url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/english.png",
-        "description": "English text sample image",
+        "image_url": "https://scontent.fcai19-5.fna.fbcdn.net/v/t39.99422-6/751871162_1749052532782904_3755488305713744429_n.png?stp=dst-jpg_tt6&cstp=mx1440x1800&ctp=s1440x1800&_nc_cat=103&ccb=1-7&_nc_sid=833d8c&_nc_ohc=p7dDW_1wXMoQ7kNvwEo2STX&_nc_oc=Adq8X5u7ZcviUQkG-k0T2LMb-1VyBk57zUZCsv2ymSSE-P980H0DjxZ4sbFCA4iMlGw&_nc_zt=14&_nc_ht=scontent.fcai19-5.fna&_nc_gid=8INnRDUf45hM1sGEyGQlAA&_nc_ss=7b2a8&oh=00_AQAwig-4muMdpu0L6wNU7lFYJU_flup5hjolrrZKtRjJ5Q&oe=6A6609DF",
+        "description": "عاجل سفن تبدأ تسجيل طواقمها لدى صنعاء لعبور المندب Onewsvemeny",
     },
     {
-        "image_url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/french.png",
-        "description": "French text sample image",
+        "image_url": "https://scontent.fcai19-5.fna.fbcdn.net/v/t39.99422-6/748527735_1039977028589358_8838463850821017904_n.png?stp=dst-jpg_tt6&cstp=mx1764x2048&ctp=s1764x2048&_nc_cat=103&ccb=1-7&_nc_sid=833d8c&_nc_ohc=ehyvNg2zBrsQ7kNvwHyycW0&_nc_oc=AdqOTD6fks4PqOcPckJy6wBhCF5-BjRUfcHP7tdCpOsFEaTXFqnr_jqp5UrRxY7wm-E&_nc_zt=14&_nc_ht=scontent.fcai19-5.fna&_nc_gid=2Xu62SInzixw57wklQxXPQ&_nc_ss=782a8&oh=00_AQD_duEHmLOzFYgVgiWQJTEkK4wac0jwcR8ode-r-7U7uQ&oe=6A660BA2",
+        "description": "اخبار سريعة الشرع برسالق حازمة : نمديد  السلام ., وسيوف دمشق حادة",
     },
 ]
 

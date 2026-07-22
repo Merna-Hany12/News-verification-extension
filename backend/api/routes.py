@@ -9,6 +9,15 @@ from backend.graph.builder import run_verify
 
 router = APIRouter()
 
+# Concurrency limit for OCR to prevent CPU/RAM exhaustion on Fargate.
+OCR_SEMAPHORE = None
+
+def get_ocr_semaphore():
+    global OCR_SEMAPHORE
+    if OCR_SEMAPHORE is None:
+        OCR_SEMAPHORE = asyncio.Semaphore(2)  # Max 2 concurrent OCR inferences
+    return OCR_SEMAPHORE
+
 @router.post("/classify")
 def classify_text(request: TextRequest, req: Request):
     classifier = getattr(req.app.state, "classifier", None)
@@ -57,6 +66,13 @@ def _run_ocr_sync(image_url: str, ocr_reader) -> str:
 
     try:
         img       = Image.open(BytesIO(resp.content)).convert("RGB")
+        
+        # Resize image to a maximum of 800x800 to drastically speed up CPU inference
+        max_dim = 800
+        if img.width > max_dim or img.height > max_dim:
+            img.thumbnail((max_dim, max_dim))
+            print(f"[HAQQ] Resized OCR image to: {img.size}")
+            
         img_array = np.array(img)
         if not ocr_reader:
             print("[HAQQ] OCR reader not loaded")
@@ -72,10 +88,14 @@ def _run_ocr_sync(image_url: str, ocr_reader) -> str:
 
 
 @router.post("/ocr")
-def ocr_image(request: ImageRequest, req: Request):
+async def ocr_image(request: ImageRequest, req: Request):
     print(f"[HAQQ] OCR request for: {request.image_url[:80]}")
     ocr_reader = getattr(req.app.state, "ocr_reader", None)
-    extracted = _run_ocr_sync(request.image_url, ocr_reader)
+    
+    sem = get_ocr_semaphore()
+    async with sem:
+        extracted = await asyncio.to_thread(_run_ocr_sync, request.image_url, ocr_reader)
+        
     return {"text": extracted}
 MIN_TEXT_LEN = 15
 
@@ -98,8 +118,13 @@ async def verify_content(request: VerifyContentRequest, req: Request):
     # concurrently with run_verify's async I/O instead of blocking the
     # event loop. Fired immediately, same "don't wait to find out if we
     # need it" principle as the old client-side version.
+    async def _run_ocr_guarded(image_url, ocr_reader):
+        sem = get_ocr_semaphore()
+        async with sem:
+            return await asyncio.to_thread(_run_ocr_sync, image_url, ocr_reader)
+
     ocr_task = (
-        asyncio.create_task(asyncio.to_thread(_run_ocr_sync, request.image_url, ocr_reader))
+        asyncio.create_task(_run_ocr_guarded(request.image_url, ocr_reader))
         if request.image_url else None
     )
 
