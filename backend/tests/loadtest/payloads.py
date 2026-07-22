@@ -107,16 +107,16 @@ CLASSIFY_PAYLOADS = [
 
 OCR_PAYLOADS = [
     {
-        "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/Cairo_Tower_from_the_south.jpg/800px-Cairo_Tower_from_the_south.jpg",
-        "description": "Cairo Tower photo",
+        "image_url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/arabic.png",
+        "description": "Arabic text sample image",
     },
     {
-        "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/All_Gizah_Pyramids.jpg/800px-All_Gizah_Pyramids.jpg",
-        "description": "Pyramids of Giza photo",
+        "image_url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/english.png",
+        "description": "English text sample image",
     },
     {
-        "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Google_2015_logo.svg/800px-Google_2015_logo.svg.png",
-        "description": "Google logo image with text",
+        "image_url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/french.png",
+        "description": "French text sample image",
     },
 ]
 
