@@ -54,6 +54,30 @@
     return;
   }
   window.__HAQQ_INJECTED__ = true;
+  window.__HAQQ_LANG__ = "ar";
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get("news_lang", (res) => {
+      if (res.news_lang) {
+        window.__HAQQ_LANG__ = res.news_lang;
+        updateUITranslations();
+      }
+    });
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && changes.news_lang) {
+        window.__HAQQ_LANG__ = changes.news_lang.newValue || "ar";
+        updateUITranslations();
+      }
+    });
+  }
+
+  function updateUITranslations() {
+    document.querySelectorAll(".haqq-btn").forEach(btn => {
+      const type = btn.dataset.type;
+      if (type && BTN_DEF && BTN_DEF[type]) {
+        btn.title = BTN_DEF[type].title[window.__HAQQ_LANG__] || BTN_DEF[type].title.ar;
+      }
+    });
+  }
 
 const PROCESSED_ATTR = "data-haqq-processed";
 const DEBUG = true;
@@ -75,7 +99,7 @@ function killIfContextInvalid() {
   clearTimeout(scanTimer);
 }
 
-const CONTEXT_DEAD_MSG = "تم تحديث الإضافة — أعد تحميل الصفحة";
+const CONTEXT_DEAD_MSG = { ar: "تم تحديث الإضافة — أعد تحميل الصفحة", en: "Extension updated — please reload the page" };
 
 // ─── PLATFORM DETECTION ────────────────────────────────────
 function detectPlatform() {
@@ -223,18 +247,23 @@ function extractAll(postEl) {
     log("Video — src:", src.slice(0, 60), "| poster:", poster.slice(0, 60));
   }
 
+  let maxArea = 0;
   for (const img of postEl.querySelectorAll("img[src]")) {
     const src = img.src || "";
     if (!src || src.startsWith("data:")) continue;
     if (src.includes("emoji") || src.includes("rsrc.php") || src.includes("static.xx.fbcdn")) continue;
     if (src.includes("_s40x40") || src.includes("_s32x32") || src.includes("_s50x50")) continue;
     if (out.videoPoster && src === out.videoPoster) continue;
-    const w = img.naturalWidth  || img.width  || img.offsetWidth  || 0;
-    const h = img.naturalHeight || img.height || img.offsetHeight || 0;
-    const isPendingLoad = (!img.complete && img.complete !== undefined) || (img.naturalWidth === 0 && img.naturalHeight === 0);
-    if (!isPendingLoad && (w < 100 || h < 80)) continue;
-    out.imageUrl = src;
-    break;
+    
+    const rect = img.getBoundingClientRect();
+    const area = rect.width * rect.height;
+    
+    // Only save the image if it's the largest one we've seen so far!
+    // 10000 means at least 100x100.
+    if (area > maxArea && area > 10000) { 
+        maxArea = area;
+        out.imageUrl = src;
+    }
   }
 
   return out;
@@ -302,9 +331,6 @@ async function captureFramesFromLiveVideo(videoEl, nFrames = 8) {
 
   return frames;
 }
-  const grp = document.createElement("div");
-  grp.className = "haqq-btn-group";
-  grp.setAttribute("data-haqq-owned", "true");
 
 // Capture a screenshot of the visible tab and crop to the video's rect
 async function captureVideoRect(videoEl) {
@@ -378,20 +404,6 @@ async function waitForRealVideoData(videoEl, timeoutMs = 8000) {
     );
     setTimeout(() => { cleanup(); resolve(isReady()); }, timeoutMs);
   });
-  if (PLATFORM === "instagram" || PLATFORM === "tiktok") {
-    const insertedNatively = insertButtonsIntoActionColumn(postEl, grp);
-    if (!insertedNatively) {
-      const panel = getOrCreatePanel(postEl);
-      panel.insertBefore(grp, panel.firstChild);
-    }
-  } else {
-    // Facebook (and any other platform): always insert a panel block below
-    // the action row — works for both labeled and compact icon-only layouts.
-    const panel = getOrCreatePanel(postEl);
-    if (!panel.querySelector(":scope > .haqq-btn-group")) {
-      panel.insertBefore(grp, panel.firstChild);
-    }
-  }
 }
 
 // ─── VIDEO URL FALLBACK (used only when frame capture isn't possible) ─
@@ -495,8 +507,8 @@ const ICON_AIMEDIA = `
 </svg>`.trim();
 
 const BTN_DEF = {
-  content: { label: ICON_CONTENT, title: "تحقق من النص والصورة معاً" },
-  aimedia: { label: ICON_AIMEDIA, title: "كشف الصور/الفيديوهات المولّدة أو المعدّلة بالذكاء الاصطناعي" },
+  content: { label: ICON_CONTENT, title: { ar: "تحقق من النص والصورة معاً", en: "Verify text and image together" } },
+  aimedia: { label: ICON_AIMEDIA, title: { ar: "كشف الصور/الفيديوهات المولّدة أو المعدّلة بالذكاء الاصطناعي", en: "Detect AI-generated or manipulated images/videos" } },
 };
 
 // ─── BUTTON (single definition — content + aimedia, frame-capture-first) ──
@@ -508,7 +520,7 @@ function makeBtn(type, postEl, content) {
   btn.dataset.type    = type;
   btn.dataset.loading = "false";
   btn.innerHTML       = def.label;
-  btn.title           = def.title;
+  btn.title           = def.title[window.__HAQQ_LANG__] || def.title.ar;
 
   const setLoading = () => {
     btn.classList.add("haqq-btn--loading");
@@ -536,8 +548,8 @@ function makeBtn(type, postEl, content) {
     if (btn.dataset.loading === "true") return;
 
     if (!isContextValid()) {
+      alert(CONTEXT_DEAD_MSG[window.__HAQQ_LANG__] || CONTEXT_DEAD_MSG.ar);
       killIfContextInvalid();
-      setError(CONTEXT_DEAD_MSG);
       return;
     }
 
@@ -621,19 +633,85 @@ function makeBtn(type, postEl, content) {
         if (frames && frames.length) {
           finalContent = { ...finalContent, frames, videoUrl: null, postPermalink: null };
         } else {
-          // Extract post permalink from the post element for backend fallback
           let postPermalink = null;
-          const allLinks = postEl.querySelectorAll("a[href]");
-          for (const a of allLinks) {
-            const href = a.getAttribute("href") || "";
-            // Facebook video/post permalink patterns
-            if (/\/(watch|videos|reel|posts|permalink)\//.test(href) ||
-                /\/\d+\/?$/.test(href) ||
-                /story_fbid/.test(href)) {
-              postPermalink = new URL(href, location.origin).href;
-              break;
+
+          if (PLATFORM === "tiktok") {
+            const isVideoPage = /\/video\/\d+/.test(window.location.href);
+            if (isVideoPage) {
+                // Theater mode: The URL is right there!
+                postPermalink = window.location.href;
+            } else {
+                // Feed mode: Look for a normal link first
+                const vidLink = postEl.querySelector('a[href*="/video/"]');
+                if (vidLink) {
+                    postPermalink = new URL(vidLink.getAttribute("href"), location.origin).href;
+                } else {
+                    // NEW MAGIC: Extract the Video ID straight from the TikTok player's ID!
+                    const xgWrapper = postEl.querySelector('[id^="xgwrapper-"]');
+                    if (xgWrapper) {
+                        const match = xgWrapper.id.match(/\d{15,20}/); // Extracts the 19-digit number
+                        if (match) {
+                            // We can use any username (like @x), TikTok only cares about the Video ID!
+                            postPermalink = `https://www.tiktok.com/@x/video/${match[0]}`;
+                        }
+                    }
+                    
+                    // Absolute Last Resort
+                    if (!postPermalink) postPermalink = window.location.href;
+                }
             }
+          } else if (PLATFORM === "instagram") {
+            // INSTAGRAM LOGIC
+            const isReelPage = /\/(reel|reels|p)\/[\w-]+/.test(window.location.href);
+            if (isReelPage) {
+                // If we are directly on a reel or post page
+                postPermalink = window.location.href;
+            } else {
+                // If we are in the feed, look for the reel link (and strictly avoid /audio/ links!)
+                const allLinks = postEl.querySelectorAll("a[href]");
+                for (const a of allLinks) {
+                    const href = a.getAttribute("href") || "";
+                    if (/\/(reel|reels|p)\/[\w-]+/.test(href) && !href.includes("/audio/")) {
+                        postPermalink = new URL(href, location.origin).href;
+                        break;
+                    }
+                }
+                if (!postPermalink) postPermalink = window.location.href;
+            }
+          }     else {
+            // FACEBOOK LOGIC (and everything else)
+            
+            // 1. If we are already on a dedicated video page, use the URL!
+            const isDirectPage = /\/(watch|videos|reel|posts|permalink)\//.test(window.location.href);
+            if (isDirectPage) {
+                postPermalink = window.location.href;
+            }
+
+            // 2. Best case: Facebook puts the video ID directly in the HTML!
+            if (!postPermalink) {
+                const videoIdNode = postEl.querySelector('[data-video-id]');
+                if (videoIdNode) {
+                    const vidId = videoIdNode.getAttribute('data-video-id');
+                    if (vidId) {
+                        postPermalink = `https://www.facebook.com/watch/?v=${vidId}`;
+                    }
+                }
+            }
+            
+            // 3. Fallback: Search for links, but be strict (no random hashtags!)
+            if (!postPermalink) {
+                const allLinks = postEl.querySelectorAll("a[href]");
+                for (const a of allLinks) {
+                  const href = a.getAttribute("href") || "";
+                  if (href.startsWith("http") && !href.includes("facebook.com")) continue;
+                  if (/\/(watch|videos|reel|posts|permalink)\//.test(href) || /story_fbid/.test(href)) {
+                    postPermalink = new URL(href, location.origin).href;
+                    break;
+                  }
+                }
+            } 
           }
+
 
           finalContent = {
             ...finalContent,
@@ -644,6 +722,15 @@ function makeBtn(type, postEl, content) {
             const poster = vid.getAttribute("poster");
             if (poster) finalContent.videoUrl = poster;
           }
+          
+          // VERY IMPORTANT: If the video URL is a local blob (like TikTok), nullify it
+          // so the backend doesn't crash trying to HTTP GET a blob!
+          if (finalContent.videoUrl && finalContent.videoUrl.startsWith("blob:")) {
+            finalContent.videoUrl = null;
+          }
+
+
+
 
           log("aimedia — no client-side frames, sending fallback:", {
             hasPostPermalink: !!postPermalink,
@@ -997,19 +1084,24 @@ function showNonNews(postEl, btn, type) {
   const panel = getOrCreatePanel(postEl);
   panel.querySelector(`.haqq-badge[data-type="${type}"]`)?.remove();
 
+  const explTxt = window.__HAQQ_LANG__ === "en" 
+    ? "This content is a personal opinion or conversation — no fact-checking needed."
+    : "هذا المحتوى رأي شخصي أو محادثة — لا يحتاج تحققاً إخبارياً.";
   const badge = document.createElement("div");
-  badge.className    = "haqq-badge haqq-badge--nonnews";
+  badge.className    = "haqq-badge";
   badge.dataset.type = type;
+  badge.dataset.verdict = "non_news";
+  badge.dir = window.__HAQQ_LANG__ === "en" ? "ltr" : "rtl";
   badge.innerHTML = `
     <div class="haqq-badge-bar">
       <span class="haqq-badge-icon">💬</span>
-      <span class="haqq-badge-typename">${TYPE_NAMES[type]}</span>
-      <span class="haqq-badge-verdict">ليس خبراً</span>
+      <span class="haqq-badge-typename">${TYPE_NAMES[type][window.__HAQQ_LANG__] || TYPE_NAMES[type].ar}</span>
+      <span class="haqq-badge-verdict">${window.__HAQQ_LANG__ === "en" ? "Opinion / Non-News" : "ليس خبراً"}</span>
       <span class="haqq-badge-right">
         <button class="haqq-dismiss" aria-label="إغلاق">✕</button>
       </span>
     </div>
-    <p class="haqq-badge-expl">هذا المحتوى رأي شخصي أو محادثة — لا يحتاج تحققاً إخبارياً.</p>
+    <p class="haqq-badge-expl">${explTxt}</p>
   `;
 
   badge.querySelector(".haqq-dismiss").addEventListener("click", () => {
@@ -1029,16 +1121,16 @@ function showNonNews(postEl, btn, type) {
 
 // ─── VERDICT BADGE ────────────────────────────────────────
 const VERDICT_CFG = {
-  fact:         { ar: "موثوق",                      cls: "fact",         icon: "✅" },
-  verified:     { ar: "موثوق",                      cls: "fact",         icon: "✅" },
-  real:         { ar: "حقيقي — غير مولَّد بالذكاء الاصطناعي", cls: "fact",  icon: "✅" },
-  unverified:   { ar: "غير مؤكد",                   cls: "unverified",   icon: "⚠️" },
-  inconclusive: { ar: "غير حاسم",                   cls: "unverified",   icon: "❔" },
-  fake:         { ar: "مضلل على الأرجح",            cls: "fake",         icon: "❌" },
-  manipulated:  { ar: "محرَّف / مُعدَّل",           cls: "manipulated",  icon: "🛠️" },
-  ai_generated: { ar: "مُولَّد بالذكاء الاصطناعي", cls: "ai",           icon: "🤖" },
+  fact:         { ar: "موثوق",                      en: "Verified",                          cls: "fact",         icon: "✅" },
+  verified:     { ar: "موثوق",                      en: "Verified",                          cls: "fact",         icon: "✅" },
+  real:         { ar: "حقيقي — غير مولَّد بالذكاء الاصطناعي", en: "Real — Not AI Generated", cls: "fact",  icon: "✅" },
+  unverified:   { ar: "غير مؤكد",                   en: "Unverified",                        cls: "unverified",   icon: "⚠️" },
+  inconclusive: { ar: "غير حاسم",                   en: "Inconclusive",                      cls: "unverified",   icon: "❔" },
+  fake:         { ar: "مضلل على الأرجح",            en: "Likely Fake",                       cls: "fake",         icon: "❌" },
+  manipulated:  { ar: "محرَّف / مُعدَّل",           en: "Manipulated",                       cls: "manipulated",  icon: "🛠️" },
+  ai_generated: { ar: "مُولَّد بالذكاء الاصطناعي", en: "AI Generated",                      cls: "ai",           icon: "🤖" },
 };
-const TYPE_NAMES = { content: "المحتوى", aimedia: "الوسائط" };
+const TYPE_NAMES = { content: {ar: "المحتوى", en: "Content"}, aimedia: {ar: "الوسائط", en: "Media"} };
 
 function showVerdict(postEl, result, type, btn) {
   const panel = getOrCreatePanel(postEl);
@@ -1046,7 +1138,8 @@ function showVerdict(postEl, result, type, btn) {
 
   const cfg  = VERDICT_CFG[result.verdict] || VERDICT_CFG.unverified;
   const pct  = Math.round((result.confidence || 0) * 100);
-  const name = TYPE_NAMES[type];
+  const name = TYPE_NAMES[type][window.__HAQQ_LANG__] || TYPE_NAMES[type].ar;
+  const title_text = cfg[window.__HAQQ_LANG__] || cfg.ar;
 
   const sourcesHtml = (result.sources || [])
     .map(s => {
@@ -1064,12 +1157,13 @@ function showVerdict(postEl, result, type, btn) {
   const badge = document.createElement("div");
   badge.className    = `haqq-badge haqq-badge--${cfg.cls}`;
   badge.dataset.type = type;
+  badge.dir = window.__HAQQ_LANG__ === "en" ? "ltr" : "rtl";
 
   badge.innerHTML = `
     <div class="haqq-badge-bar">
       <span class="haqq-badge-icon">${cfg.icon}</span>
       <span class="haqq-badge-typename">${name}</span>
-      <span class="haqq-badge-verdict">${cfg.ar}</span>
+      <span class="haqq-badge-verdict">${title_text}</span>
       <span class="haqq-badge-right">
         ${pct > 0 ? `<span class="haqq-pct">${pct}%</span>` : ""}
         ${result.mock ? `<span class="haqq-mock">Mock</span>` : ""}
@@ -1081,7 +1175,7 @@ function showVerdict(postEl, result, type, btn) {
       : ""}
     ${sourcesHtml
       ? `<div class="haqq-sources">
-           <span class="haqq-src-lbl">📎 المصادر</span>
+           <span class="haqq-src-lbl">${window.__HAQQ_LANG__ === "en" ? "📎 Sources" : "📎 المصادر"}</span>
            <div class="haqq-src-list">${sourcesHtml}</div>
          </div>`
       : ""}

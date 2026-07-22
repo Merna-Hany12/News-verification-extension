@@ -21,3 +21,4 @@ class DetectMediaRequest(BaseModel):
     video_url: Optional[str] = None
     post_permalink: Optional[str] = None
     extracted_frames: Optional[list[str]] = None
+    lang: str = "ar"
