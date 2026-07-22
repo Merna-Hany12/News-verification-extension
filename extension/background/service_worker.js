@@ -254,7 +254,7 @@ async function detectMedia({
           video_url: videoUrl || null,
           post_permalink: postPermalink || null,
           extracted_frames: extractedFrames || null,
-          platform: platform || "generic"
+          platform: platform || "generic",
           lang: lang || "ar"
         }),
       });
