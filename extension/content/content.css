@@ -232,6 +232,7 @@ html[data-haqq-platform="tiktok"] .haqq-spinner {
 .haqq-badge--ai         { border-inline-start: 3px solid #4285f4 !important; }
 .haqq-badge--manipulated{ border-inline-start: 3px solid #f0630a !important; }
 .haqq-badge--nonnews    { border-inline-start: 3px solid #8e8e8e !important; }
+.haqq-badge--limit      { border-inline-start: 3px solid #ff9800 !important; }
 
 /* Badge bar (top row) */
 .haqq-badge-bar {
