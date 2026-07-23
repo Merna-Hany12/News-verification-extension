@@ -131,7 +131,13 @@ async function verifyContentBackend({ text, imageUrl, lang }) {
         }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 429) {
+          const limitMsg = lang === "en" ? "You have exceeded your daily limit. Please try again tomorrow." : "لقد تجاوزت الحد اليومي من الطلبات. يرجى المحاولة غداً.";
+          return result("limit_exceeded", 0, limitMsg, []);
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
 
       const out = await res.json();   // { verdict, confidence, explanation, sources, text_source }
 
@@ -179,7 +185,13 @@ async function verifyText({ text, lang }) {
         body: JSON.stringify({ text: text.trim().slice(0, 1000), lang }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 429) {
+          const limitMsg = lang === "en" ? "You have exceeded your daily limit. Please try again tomorrow." : "لقد تجاوزت الحد اليومي من الطلبات. يرجى المحاولة غداً.";
+          return result("limit_exceeded", 0, limitMsg, []);
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
 
       const out = await res.json();   // { verdict, confidence, explanation, sources }
 
@@ -259,7 +271,13 @@ async function detectMedia({
         }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 429) {
+          const limitMsg = lang === "en" ? "You have exceeded your daily limit. Please try again tomorrow." : "لقد تجاوزت الحد اليومي من الطلبات. يرجى المحاولة غداً.";
+          return result("limit_exceeded", 0, limitMsg, []);
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
 
       const out = await res.json();
 

@@ -247,7 +247,7 @@ function extractAll(postEl) {
     log("Video — src:", src.slice(0, 60), "| poster:", poster.slice(0, 60));
   }
 
-  let maxArea = 0;
+  let maxArea = -1;
   for (const img of postEl.querySelectorAll("img[src]")) {
     const src = img.src || "";
     if (!src || src.startsWith("data:")) continue;
@@ -258,10 +258,10 @@ function extractAll(postEl) {
     const rect = img.getBoundingClientRect();
     const area = rect.width * rect.height;
     
-    // Only save the image if it's the largest one we've seen so far!
-    // 10000 means at least 100x100.
-    if (area > maxArea && area > 10000) { 
-        maxArea = area;
+    // Often images haven't rendered yet when this runs (area = 0).
+    // We still want to capture them if they pass the filters above!
+    if (area > maxArea || (area === 0 && maxArea <= 0)) { 
+        maxArea = area > 0 ? area : 0;
         out.imageUrl = src;
     }
   }
