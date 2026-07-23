@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request, HTTPException
 import asyncio
 from backend.api.schemas import TextRequest, ImageRequest, DetectMediaRequest, VerifyContentRequest
 from backend.graph.builder import run_verify
+from backend.api.rate_limiter import limiter, global_key_func
 
 router = APIRouter()
 
@@ -104,20 +105,22 @@ from backend.observability.axiom_logger import axiom_logger, extract_platform
 import time
 
 @router.post("/verify-content")
-async def verify_content(request: VerifyContentRequest, req: Request):
+@limiter.limit("10/day")
+@limiter.limit("3/second", key_func=global_key_func)
+async def verify_content(payload: VerifyContentRequest, request: Request):
     """
     Single-request replacement for the extension's old client-side
     orchestration (verify text -> maybe OCR -> maybe re-verify).
     """
     start_time = time.time()
-    request_id = getattr(req.state, 'request_id', 'unknown')
+    request_id = getattr(request.state, 'request_id', 'unknown')
     
-    graph      = getattr(req.app.state, "haqq_graph", None)
-    ocr_reader = getattr(req.app.state, "ocr_reader", None)
+    graph      = getattr(request.app.state, "haqq_graph", None)
+    ocr_reader = getattr(request.app.state, "ocr_reader", None)
     if not graph:
         raise HTTPException(status_code=500, detail="LangGraph pipeline not compiled")
 
-    direct_text = (request.text or "").strip()
+    direct_text = (payload.text or "").strip()
 
     # OCR is CPU-bound/synchronous — run it in a thread so it executes
     # concurrently with run_verify's async I/O instead of blocking the
@@ -129,8 +132,8 @@ async def verify_content(request: VerifyContentRequest, req: Request):
             return await asyncio.to_thread(_run_ocr_sync, image_url, ocr_reader)
 
     ocr_task = (
-        asyncio.create_task(_run_ocr_guarded(request.image_url, ocr_reader))
-        if request.image_url else None
+        asyncio.create_task(_run_ocr_guarded(payload.image_url, ocr_reader))
+        if payload.image_url else None
     )
 
     def _log_and_return(result: dict, text_source: str):
@@ -146,9 +149,9 @@ async def verify_content(request: VerifyContentRequest, req: Request):
             "total_cost_usd": result.get("total_cost_usd", 0.0),
             "latency_ms": elapsed_ms,
             "trusted_sources_count": sum(1 for s in result.get("sources", []) if s.get("trusted")),
-            "lang": request.lang,
+            "lang": payload.lang,
             "text_length": len(direct_text),
-            "platform": extract_platform(request.image_url)
+            "platform": extract_platform(payload.image_url)
         })
         return {**result, "text_source": text_source}
 
@@ -161,16 +164,16 @@ async def verify_content(request: VerifyContentRequest, req: Request):
                 "explanation": "لا يوجد نص كافٍ في هذا المنشور للتحقق منه.",
                 "sources": [],
             }, "none")
-        result = await run_verify(graph, ocr_text, request.lang, request_id)
+        result = await run_verify(graph, ocr_text, payload.lang, request_id)
         return _log_and_return(result, "ocr")
 
-    first_result = await run_verify(graph, direct_text, request.lang, request_id)
+    first_result = await run_verify(graph, direct_text, payload.lang, request_id)
 
     should_try_ocr = first_result.get("verdict") in ("unverified", "non_news")
     if should_try_ocr and ocr_task:
         ocr_text = ((await ocr_task) or "").strip()
         if len(ocr_text) >= MIN_TEXT_LEN:
-            ocr_result = await run_verify(graph, ocr_text, request.lang, request_id)
+            ocr_result = await run_verify(graph, ocr_text, payload.lang, request_id)
             return _log_and_return(ocr_result, "ocr_retry")
 
     return _log_and_return(first_result, "direct")
