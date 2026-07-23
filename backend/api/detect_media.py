@@ -24,7 +24,7 @@ from backend.core.preprocessing import (
 )
 
 router = APIRouter()
-
+from backend.api.rate_limiter import limiter, global_key_func
 
 # ─── Route Handler ──────────────────────────────────────────────────────────
 
@@ -32,13 +32,15 @@ from backend.observability.axiom_logger import axiom_logger, extract_platform
 import time
 
 @router.post("/detect-media")
-async def detect_media(request: DetectMediaRequest, req: Request):
+@limiter.limit("10/day")
+@limiter.limit("2/second", key_func=global_key_func)
+async def detect_media(payload: DetectMediaRequest, request: Request):
     start_time = time.time()
-    request_id = getattr(req.state, 'request_id', 'unknown')
+    request_id = getattr(request.state, 'request_id', 'unknown')
     
-    yunet = req.app.state.yunet
-    gend_model = req.app.state.gend_model
-    platform = request.platform or "generic"
+    yunet = request.app.state.yunet
+    gend_model = request.app.state.gend_model
+    platform = payload.platform or "generic"
 
     frames = None
     timestamps: list = []
@@ -48,11 +50,11 @@ async def detect_media(request: DetectMediaRequest, req: Request):
 
     # ── 1. Frame Acquisition ──────────────────────────────────────────────
 
-    if request.extracted_frames:
-        print(f"[HAQQ] Received {len(request.extracted_frames)} client-side extracted frames!")
+    if payload.extracted_frames:
+        print(f"[HAQQ] Received {len(payload.extracted_frames)} client-side extracted frames!")
         try:
             frames = []
-            for b64 in request.extracted_frames:
+            for b64 in payload.extracted_frames:
                 img_data = base64.b64decode(b64)
                 img = Image.open(BytesIO(img_data)).convert("RGB")
                 frames.append(img)
@@ -70,8 +72,8 @@ async def detect_media(request: DetectMediaRequest, req: Request):
     if frames:
         # Already have frames decoded from client-side capture
         pass
-    elif request.video_url:
-        target_url, is_permalink = request.video_url, False
+    elif payload.video_url:
+        target_url, is_permalink = payload.video_url, False
         print(f"[HAQQ] Processing video URL: {target_url[:80]}...")
 
         # Content-Type is now used ONLY to decide whether to PREFER the
@@ -87,11 +89,11 @@ async def detect_media(request: DetectMediaRequest, req: Request):
         # matter which path we take here.
         content_type = await _check_content_type(target_url)
         if content_type.startswith("image/"):
-            if request.post_permalink:
+            if payload.post_permalink:
                 print(f"[HAQQ] Content-Type looks like an image ({content_type}) — "
                       f"preferring post_permalink with Playwright, since the permalink page "
                       f"is more likely to yield the real video than a bare CDN URL.")
-                target_url, is_permalink = request.post_permalink, True
+                target_url, is_permalink = payload.post_permalink, True
             else:
                 print(f"[HAQQ] Content-Type looks like an image ({content_type}) but no "
                       f"post_permalink is available — NOT skipping Playwright. Attempting "
@@ -106,24 +108,24 @@ async def detect_media(request: DetectMediaRequest, req: Request):
                   f"proceeding with Playwright anyway, but this is worth investigating "
                   f"if it keeps happening")
 
-    elif request.post_permalink:
-        target_url, is_permalink = request.post_permalink, True
+    elif payload.post_permalink:
+        target_url, is_permalink = payload.post_permalink, True
         print(f"[HAQQ] Processing post permalink: {target_url[:80]}...")
 
-    elif request.image_url:
-        print(f"[HAQQ] Processing image URL: {request.image_url[:80]}...")
+    elif payload.image_url:
+        print(f"[HAQQ] Processing image URL: {payload.image_url[:80]}...")
         try:
-            img = await _download_single_image(request.image_url)
+            img = await _download_single_image(payload.image_url)
             frames, extraction_method = [img], "single-image"
             timestamps = [None]
-            saved_frames_dir = save_frames_to_disk(frames, timestamps, request.image_url)
+            saved_frames_dir = save_frames_to_disk(frames, timestamps, payload.image_url)
         except Exception as e:
             print(f"[HAQQ] Image download/decode failed: {e}")
             print(traceback.format_exc())
             raise HTTPException(status_code=400, detail=f"Could not download image: {e}")
 
     else:
-        msg = "No media available to analyze." if request.lang == "en" else "لا توجد وسائط لتحليلها."
+        msg = "No media available to analyze." if payload.lang == "en" else "لا توجد وسائط لتحليلها."
         return {"verdict": "inconclusive", "confidence": 0.0, "explanation": msg, "sources": []}
 
     saved_frames_dir = None
@@ -137,9 +139,9 @@ async def detect_media(request: DetectMediaRequest, req: Request):
         except NotAVideoError as e:
             # The page didn't have a video, or it was a static image pretending to be one.
             print(f"[HAQQ] {e} — redirecting to single-image analysis instead")
-            fallback_url = request.image_url if is_permalink else target_url
+            fallback_url = payload.image_url if is_permalink else target_url
             if not fallback_url:
-                fallback_url = request.image_url or request.video_url
+                fallback_url = payload.image_url or payload.video_url
 
             try:
                 print(f"[HAQQ] Using fallback URL for image analysis: {fallback_url[:80]}")
@@ -155,7 +157,7 @@ async def detect_media(request: DetectMediaRequest, req: Request):
                 )
         except Exception as e:
             print(f"[HAQQ] Playwright failed: {e}. Trying to fallback to image_url...")
-            fallback_url = request.image_url or (request.video_url if request.video_url and request.video_url != target_url else None)
+            fallback_url = payload.image_url or (payload.video_url if payload.video_url and payload.video_url != target_url else None)
             if fallback_url:
                 try:
                     print(f"[HAQQ] Using fallback URL for image analysis: {fallback_url[:80]}")
@@ -243,8 +245,8 @@ async def detect_media(request: DetectMediaRequest, req: Request):
     roi_frames = [strip_black_bars(f) for f in frames]
 
     # ── 5. AIGC Inference (ConvNeXt only) ─────────────────────────────────
-    convnext_model = req.app.state.convnext_model
-    convnext_transform = req.app.state.convnext_transform
+    convnext_model = request.app.state.convnext_model
+    convnext_transform = request.app.state.convnext_transform
 
     # Ensure model is on the correct device (GPU if available)
     model_device = gend_model.device
@@ -294,7 +296,7 @@ async def detect_media(request: DetectMediaRequest, req: Request):
     # isn't read the same way as a full video analysis.
     explanation = result["explanation"]
     if extraction_method == "single-image":
-        if request.lang == "en":
+        if payload.lang == "en":
             explanation += " ⚠️ (Thumbnail analyzed only — full video extraction failed or skipped, accuracy is lower)"
         else:
             explanation += " ⚠️ (تحليل الصورة المصغّرة فقط — لم يتم تحميل الفيديو الفعلي بعد، الدقة أقل من تحليل كامل)"
@@ -350,7 +352,7 @@ async def detect_media(request: DetectMediaRequest, req: Request):
         "confidence": result["confidence"],
         "latency_ms": elapsed_ms,
         "model_used": "GenD" if faces_detected else "SigLIP",
-        "platform": extract_platform(request.post_permalink or request.video_url or request.image_url)
+        "platform": extract_platform(payload.post_permalink or payload.video_url or payload.image_url)
     })
     
     return result

@@ -131,10 +131,15 @@ async def lifespan(app: FastAPI):
 
 from backend.observability.langsmith_config import setup_langsmith
 from backend.observability.middleware import ObservabilityMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from backend.api.rate_limiter import limiter
 
 setup_langsmith()
 
 app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(ObservabilityMiddleware)
 
