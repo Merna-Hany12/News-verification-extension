@@ -27,6 +27,7 @@ dependencies = [
     "ipykernel>=7.3.0",
     "yake>=0.7.3",
     "playwright>=1.61.0",
+    "timm",
 ]
 
 [dependency-groups]

@@ -21,6 +21,8 @@ dependencies = [
     "transformers>=4.40.0",
     "uvicorn[standard]>=0.30.0",
     "yake>=0.7.3",
+    "timm",
+    "playwright>=1.61.0",
 ]
 
 [dependency-groups]
