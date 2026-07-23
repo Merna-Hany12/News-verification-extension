@@ -259,7 +259,8 @@ def save_frames_to_disk(frames: list, timestamps: list, url: str) -> str | None:
 
     Returns the folder path where this run's frames were saved, or None if disabled.
     """
-    if os.environ.get("ENABLE_DEBUG_FRAMES", "false").lower() != "true":
+    from backend.core.config import ENABLE_DEBUG_FRAMES
+    if not ENABLE_DEBUG_FRAMES:
         return None
 
     # One subfolder per request, named by timestamp + a short hash of
