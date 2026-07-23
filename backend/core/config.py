@@ -13,7 +13,7 @@ CURRENTS_KEY = os.environ.get("CURRENTS_API_KEY", "")
 GNEWS_KEY    = os.environ.get("GNEWS_API_KEY",    "")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY",     "")
 GROQ_MODEL   = os.environ.get("GROQ_MODEL",       "llama-3.3-70b-versatile")
-ENABLE_DEBUG_FRAMES = os.environ.get("ENABLE_DEBUG_FRAMES", "false").lower() == "true"
+ENABLE_DEBUG_FRAMES = os.environ.get("ENABLE_DEBUG_FRAMES", "true").lower() == "true"
 
 # How many chars of article body to pass to the LLM per article
 BODY_CHARS_PER_ARTICLE = 500

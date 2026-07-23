@@ -17,15 +17,7 @@
 //      `function name() {}` declaration silently wins — so the
 //      retry/permalink logic was dead code that never actually ran.
 //      This file keeps exactly ONE definition of each.
-//   2. CLIENT-SIDE FRAME CAPTURE — for "aimedia", we now try to grab
-//      frames directly off the live, already-authenticated <video>
-//      element in the page (canvas capture) BEFORE falling back to
-//      sending a CDN URL/permalink to the backend for server-side
-//      extraction. This avoids re-fetching the video without the
-//      user's session/cookies entirely for the common case. Falls
-//      back to the old getVideoUrlWithRetry() path automatically if
-//      capture isn't possible yet (video not mounted) or is blocked
-//      (tainted canvas — cross-origin video without permissive CORS).
+
 //
 // v16 fix (from screenshot showing Like/Comment/Share crushed by the
 // verdict badge): toolbar (buttons) and any resulting badge now live
@@ -279,132 +271,7 @@ function extractAll(postEl) {
 // This bypasses ALL CORS because captureVisibleTab captures composited
 // pixels, not DOM data.
 
-async function captureFramesFromLiveVideo(videoEl, nFrames = 8) {
-  // Make sure video is visible and playing
-  videoEl.scrollIntoView({ block: "center", behavior: "instant" });
-  await new Promise(r => setTimeout(r, 300));
 
-  videoEl.muted = true;
-  const wasPlaying = !videoEl.paused;
-
-  // Try to start playback so data loads
-  try { await videoEl.play().catch(() => {}); } catch (_) {}
-  await new Promise(r => setTimeout(r, 500));
-
-  const duration = videoEl.duration;
-  const hasDuration = isFinite(duration) && duration > 0;
-
-  const frames = [];
-
-  if (hasDuration) {
-    // Seek-based: spread frames across the duration
-    videoEl.pause();
-    const inset = Math.min(0.15 * duration, 0.5);
-    const timestamps = Array.from({ length: nFrames }, (_, i) =>
-      inset + i * (duration - 2 * inset) / (nFrames - 1)
-    );
-
-    for (const t of timestamps) {
-      await seekTo(videoEl, t);
-      await new Promise(r => setTimeout(r, 200)); // let the frame render
-
-      const frame = await captureVideoRect(videoEl);
-      if (frame) {
-        frames.push({ dataUrl: frame, timestamp: videoEl.currentTime });
-      }
-    }
-
-    if (wasPlaying) videoEl.play().catch(() => {});
-  } else {
-    // Duration unknown (MSE/live) — capture as it plays, spaced out
-    if (videoEl.paused) {
-      try { await videoEl.play().catch(() => {}); } catch (_) {}
-    }
-    for (let i = 0; i < nFrames; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      const frame = await captureVideoRect(videoEl);
-      if (frame) {
-        frames.push({ dataUrl: frame, timestamp: videoEl.currentTime });
-      }
-    }
-  }
-
-  return frames;
-}
-
-// Capture a screenshot of the visible tab and crop to the video's rect
-async function captureVideoRect(videoEl) {
-  const rect = videoEl.getBoundingClientRect();
-  if (rect.width < 10 || rect.height < 10) return null;
-
-  // Ask service worker to screenshot the tab
-  const screenshotDataUrl = await new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      { type: "HAQQ_CAPTURE_TAB" },
-      (response) => {
-        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-        if (!response || response.error) return reject(new Error(response?.error || "No response"));
-        resolve(response.dataUrl);
-      }
-    );
-  });
-
-  // Crop to video rect
-  const dpr = window.devicePixelRatio || 1;
-  const cropX = rect.left * dpr;
-  const cropY = rect.top * dpr;
-  const cropW = rect.width * dpr;
-  const cropH = rect.height * dpr;
-
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(cropW);
-      canvas.height = Math.round(cropH);
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img,
-        Math.round(cropX), Math.round(cropY), Math.round(cropW), Math.round(cropH),
-        0, 0, canvas.width, canvas.height
-      );
-      resolve(canvas.toDataURL("image/jpeg", 0.85));
-    };
-    img.onerror = () => resolve(null);
-    img.src = screenshotDataUrl;
-  });
-}
-
-function seekTo(videoEl, t) {
-  return new Promise((resolve) => {
-    const onSeeked = () => { videoEl.removeEventListener("seeked", onSeeked); resolve(); };
-    videoEl.addEventListener("seeked", onSeeked);
-    videoEl.currentTime = t;
-    setTimeout(resolve, 3000); // fallback if seeked never fires
-  });
-}
-
-// Waits for the video to actually load REAL data (not just the poster)
-async function waitForRealVideoData(videoEl, timeoutMs = 8000) {
-  const isReady = () => videoEl.readyState >= 2;
-  if (isReady()) return true;
-
-  videoEl.muted = true;
-  try { await videoEl.play().catch(() => {}); } catch (_) {}
-
-  return new Promise((resolve) => {
-    if (isReady()) return resolve(true);
-    const onEvt = () => { if (isReady()) { cleanup(); resolve(true); } };
-    const cleanup = () => {
-      ["loadedmetadata", "loadeddata", "canplay", "durationchange", "playing"].forEach(
-        ev => videoEl.removeEventListener(ev, onEvt)
-      );
-    };
-    ["loadedmetadata", "loadeddata", "canplay", "durationchange", "playing"].forEach(
-      ev => videoEl.addEventListener(ev, onEvt)
-    );
-    setTimeout(() => { cleanup(); resolve(isReady()); }, timeoutMs);
-  });
-}
 
 // ─── VIDEO URL FALLBACK (used only when frame capture isn't possible) ─
 // Handles three layered problems, in order:
@@ -566,184 +433,95 @@ function makeBtn(type, postEl, content) {
       };
 
       if (type === "aimedia") {
-        let frames = null;
-
-        // Step 1: Scroll the post into view to trigger Facebook's lazy video loading
+        // 1. Scroll post into view to force Facebook to populate DOM attributes
         postEl.scrollIntoView({ block: "center", behavior: "instant" });
-        await new Promise(r => setTimeout(r, 500));
-
-        // Step 2: Find the video element — it may not exist yet (lazy-loaded)
+        await new Promise(r => setTimeout(r, 300));
+        let postPermalink = null;
         let vid = postEl.querySelector("video");
-        if (!vid) {
-          log("aimedia — no <video> in DOM yet, waiting up to 5s for lazy-load...");
-          // Try hovering/interacting to trigger lazy video insertion
-          const tileLink = postEl.querySelector("a") || postEl;
-          for (const ev of ["mouseover", "mouseenter", "pointerenter"]) {
-            tileLink.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true }));
-          }
-          // Also try clicking to trigger video player
-          try {
-            const playBtn = postEl.querySelector('[aria-label*="play" i], [aria-label*="Play" i], [role="button"]');
-            if (playBtn) playBtn.click();
-          } catch (_) {}
 
-          for (let i = 0; i < 10; i++) {
-            await new Promise(r => setTimeout(r, 500));
-            vid = postEl.querySelector("video");
-            if (vid) {
-              log(`aimedia — <video> appeared after ${(i + 1) * 500}ms`);
-              break;
+        if (PLATFORM === "tiktok") {
+          const isVideoPage = /\/video\/\d+/.test(window.location.href);
+          if (isVideoPage) {
+            postPermalink = window.location.href;
+          } else {
+            const vidLink = postEl.querySelector('a[href*="/video/"]');
+            if (vidLink) {
+              postPermalink = new URL(vidLink.getAttribute("href"), location.origin).href;
+            } else {
+              const xgWrapper = postEl.querySelector('[id^="xgwrapper-"]');
+              if (xgWrapper) {
+                const match = xgWrapper.id.match(/\d{15,20}/);
+                if (match) {
+                  postPermalink = `https://www.tiktok.com/@x/video/${match[0]}`;
+                }
+              }
+              if (!postPermalink) postPermalink = window.location.href;
+            }
+          }
+        } else if (PLATFORM === "instagram") {
+          const isReelPage = /\/(reel|reels|p)\/[\w-]+/.test(window.location.href);
+          if (isReelPage) {
+            postPermalink = window.location.href;
+          } else {
+            const allLinks = postEl.querySelectorAll("a[href]");
+            for (const a of allLinks) {
+              const href = a.getAttribute("href") || "";
+              if (/\/(reel|reels|p)\/[\w-]+/.test(href) && !href.includes("/audio/")) {
+                postPermalink = new URL(href, location.origin).href;
+                break;
+              }
+            }
+            if (!postPermalink) postPermalink = window.location.href;
+          }
+        } else {
+          // FACEBOOK LOGIC
+          const isDirectPage = /\/(watch|videos|reel|posts|permalink)\//.test(window.location.href);
+          if (isDirectPage) {
+            postPermalink = window.location.href;
+          }
+
+          if (!postPermalink) {
+            const videoIdNode = postEl.querySelector('[data-video-id]');
+            if (videoIdNode) {
+              const vidId = videoIdNode.getAttribute('data-video-id');
+              if (vidId) {
+                postPermalink = `https://www.facebook.com/watch/?v=${vidId}`;
+              }
+            }
+          }
+
+          if (!postPermalink) {
+            const allLinks = postEl.querySelectorAll("a[href]");
+            for (const a of allLinks) {
+              const href = a.getAttribute("href") || "";
+              if (href.startsWith("http") && !href.includes("facebook.com")) continue;
+              if (/\/(watch|videos|reel|posts|permalink)\//.test(href) || /story_fbid/.test(href)) {
+                postPermalink = new URL(href, location.origin).href;
+                break;
+              }
             }
           }
         }
 
-        // Step 3: If we found a video element, try to capture frames from it
+        finalContent = {
+          ...finalContent,
+          postPermalink: postPermalink,
+          frames: null,
+        };
+
         if (vid) {
-          log(`aimedia — found <video>, readyState=${vid.readyState}, duration=${vid.duration}, src=${(vid.src || "").slice(0, 60)}`);
-
-          // Try to get the video to start playing / loading data
-          vid.muted = true;
-          vid.scrollIntoView({ block: "center", behavior: "instant" });
-          try { await vid.play().catch(() => {}); } catch (_) {}
-
-          // Wait for video data, but don't give up if this fails
-          const ready = await waitForRealVideoData(vid, 10000);
-          log(`aimedia — waitForRealVideoData returned ${ready}, readyState=${vid.readyState}`);
-
-          // Attempt captureVisibleTab even if not "ready" — the video
-          // may be visually rendering frames via MSE even when readyState
-          // reports a low value.
-          try {
-            const captured = await captureFramesFromLiveVideo(vid, 8);
-            if (captured && captured.length > 0) {
-              frames = captured.map(f => f.dataUrl);
-              log(`aimedia — captured ${frames.length} frames via captureVisibleTab!`);
-            } else {
-              log("aimedia — captureFramesFromLiveVideo returned empty");
-            }
-          } catch (e) {
-            log("aimedia — frame capture failed:", e.message);
-            frames = null;
-          }
-        } else {
-          log("aimedia — no <video> element found even after waiting");
+          const poster = vid.getAttribute("poster");
+          if (poster) finalContent.videoUrl = poster;
         }
 
-        // Step 4: Build finalContent — either with frames or with fallback URL/permalink
-        if (frames && frames.length) {
-          finalContent = { ...finalContent, frames, videoUrl: null, postPermalink: null };
-        } else {
-          let postPermalink = null;
-
-          if (PLATFORM === "tiktok") {
-            const isVideoPage = /\/video\/\d+/.test(window.location.href);
-            if (isVideoPage) {
-                // Theater mode: The URL is right there!
-                postPermalink = window.location.href;
-            } else {
-                // Feed mode: Look for a normal link first
-                const vidLink = postEl.querySelector('a[href*="/video/"]');
-                if (vidLink) {
-                    postPermalink = new URL(vidLink.getAttribute("href"), location.origin).href;
-                } else {
-                    // NEW MAGIC: Extract the Video ID straight from the TikTok player's ID!
-                    const xgWrapper = postEl.querySelector('[id^="xgwrapper-"]');
-                    if (xgWrapper) {
-                        const match = xgWrapper.id.match(/\d{15,20}/); // Extracts the 19-digit number
-                        if (match) {
-                            // We can use any username (like @x), TikTok only cares about the Video ID!
-                            postPermalink = `https://www.tiktok.com/@x/video/${match[0]}`;
-                        }
-                    }
-                    
-                    // Absolute Last Resort
-                    if (!postPermalink) postPermalink = window.location.href;
-                }
-            }
-          } else if (PLATFORM === "instagram") {
-            // INSTAGRAM LOGIC
-            const isReelPage = /\/(reel|reels|p)\/[\w-]+/.test(window.location.href);
-            if (isReelPage) {
-                // If we are directly on a reel or post page
-                postPermalink = window.location.href;
-            } else {
-                // If we are in the feed, look for the reel link (and strictly avoid /audio/ links!)
-                const allLinks = postEl.querySelectorAll("a[href]");
-                for (const a of allLinks) {
-                    const href = a.getAttribute("href") || "";
-                    if (/\/(reel|reels|p)\/[\w-]+/.test(href) && !href.includes("/audio/")) {
-                        postPermalink = new URL(href, location.origin).href;
-                        break;
-                    }
-                }
-                if (!postPermalink) postPermalink = window.location.href;
-            }
-          }     else {
-            // FACEBOOK LOGIC (and everything else)
-            
-            // 1. If we are already on a dedicated video page, use the URL!
-            const isDirectPage = /\/(watch|videos|reel|posts|permalink)\//.test(window.location.href);
-            if (isDirectPage) {
-                postPermalink = window.location.href;
-            }
-
-            // 2. Best case: Facebook puts the video ID directly in the HTML!
-            if (!postPermalink) {
-                const videoIdNode = postEl.querySelector('[data-video-id]');
-                if (videoIdNode) {
-                    const vidId = videoIdNode.getAttribute('data-video-id');
-                    if (vidId) {
-                        postPermalink = `https://www.facebook.com/watch/?v=${vidId}`;
-                    }
-                }
-            }
-            
-            // 3. Fallback: Search for links, but be strict (no random hashtags!)
-            if (!postPermalink) {
-                const allLinks = postEl.querySelectorAll("a[href]");
-                for (const a of allLinks) {
-                  const href = a.getAttribute("href") || "";
-                  if (href.startsWith("http") && !href.includes("facebook.com")) continue;
-                  if (/\/(watch|videos|reel|posts|permalink)\//.test(href) || /story_fbid/.test(href)) {
-                    postPermalink = new URL(href, location.origin).href;
-                    break;
-                  }
-                }
-            } 
-          }
-
-
-          finalContent = {
-            ...finalContent,
-            postPermalink: postPermalink,
-          };
-
-          if (vid) {
-            const poster = vid.getAttribute("poster");
-            if (poster) finalContent.videoUrl = poster;
-          }
-          
-          // VERY IMPORTANT: If the video URL is a local blob (like TikTok), nullify it
-          // so the backend doesn't crash trying to HTTP GET a blob!
-          if (finalContent.videoUrl && finalContent.videoUrl.startsWith("blob:")) {
-            finalContent.videoUrl = null;
-          }
-
-
-
-
-          log("aimedia — no client-side frames, sending fallback:", {
-            hasPostPermalink: !!postPermalink,
-            hasVideoUrl: !!finalContent.videoUrl,
-          });
+        if (finalContent.videoUrl && finalContent.videoUrl.startsWith("blob:")) {
+          finalContent.videoUrl = null;
         }
 
-        log("aimedia — sending:", {
-          hasFrames: !!(frames && frames.length),
-          numFrames: frames ? frames.length : 0,
+        log("aimedia — sending payload to Playwright server pipeline:", {
+          hasPostPermalink: !!postPermalink,
           hasVideoUrl: !!finalContent.videoUrl,
           hasImageUrl: !!finalContent.imageUrl,
-          hasPostPermalink: !!finalContent.postPermalink,
         });
       }
 

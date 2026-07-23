@@ -48,26 +48,8 @@ async def detect_media(payload: DetectMediaRequest, request: Request):
     target_url = None
     is_permalink = False
 
-    # ── 1. Frame Acquisition ──────────────────────────────────────────────
 
-    if payload.extracted_frames:
-        print(f"[HAQQ] Received {len(payload.extracted_frames)} client-side extracted frames!")
-        try:
-            frames = []
-            for b64 in payload.extracted_frames:
-                img_data = base64.b64decode(b64)
-                img = Image.open(BytesIO(img_data)).convert("RGB")
-                frames.append(img)
-
-            if frames:
-                extraction_method = "captureVisibleTab"
-                timestamps = [None] * len(frames)
-                target_url = None  # Skip Playwright branch entirely
-                saved_frames_dir = save_frames_to_disk(frames, timestamps, "client-side-capture")
-                print(f"[HAQQ] Successfully decoded {len(frames)} client-side frames, saved to {saved_frames_dir}")
-        except Exception as e:
-            print(f"[HAQQ] Failed to decode client frames: {e}")
-            frames = None  # Fall through to other paths
+    
 
     if frames:
         # Already have frames decoded from client-side capture

@@ -60,23 +60,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         case "HAQQ_DETECT_MEDIA":
           return sendResponse({ data: await detectMedia(msg.payload) });
 
-        case "HAQQ_CAPTURE_TAB":
-          // Used by content.js to capture the visible tab for video frame extraction.
-          // This bypasses CORS/tainted-canvas because captureVisibleTab captures
-          // composited pixels from the GPU, not DOM element data.
-          try {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            if (!tab?.id) return sendResponse({ error: "No active tab" });
-            const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-              format: "jpeg",
-              quality: 85,
-            });
-            return sendResponse({ dataUrl });
-          } catch (e) {
-            console.warn("[HAQQ] captureVisibleTab error:", e.message);
-            return sendResponse({ error: e.message });
-          }
-
         case "HAQQ_OCR_IMAGE":
           return sendResponse({ data: await ocrImage(msg.payload) });
 
