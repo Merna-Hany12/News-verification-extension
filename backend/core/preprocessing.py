@@ -249,7 +249,7 @@ def robust_xor_fusion(
 
 # ─── Debug / Disk Utilities ─────────────────────────────────────────────────
 
-def save_frames_to_disk(frames: list, timestamps: list, url: str) -> str:
+def save_frames_to_disk(frames: list, timestamps: list, url: str) -> str | None:
     """
     Saves every extracted frame as a real PNG file on disk, so you can
     open them directly and see exactly what the pipeline captured —
@@ -257,8 +257,12 @@ def save_frames_to_disk(frames: list, timestamps: list, url: str) -> str:
     (spread across the video) or suspiciously identical (a sign of the
     misclassification/black-box bugs we've been chasing).
 
-    Returns the folder path where this run's frames were saved.
+    Returns the folder path where this run's frames were saved, or None if disabled.
     """
+    from backend.core.config import ENABLE_DEBUG_FRAMES
+    if not ENABLE_DEBUG_FRAMES:
+        return None
+
     # One subfolder per request, named by timestamp + a short hash of
     # the URL so repeated runs don't overwrite each other.
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
